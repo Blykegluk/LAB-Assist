@@ -1,0 +1,15 @@
+{
+  "stores": ["AEJB", "JAB"],
+  "generated_dir": "generated",
+  "pdf": {
+    "title": "Contrat",
+    "footer_text": "Document généré automatiquement"
+  },
+  "templates": {
+    "AEJB": "templates/AEJB_CDI_VENDEUR.txt",
+    "JAB": "templates/JAB_CDI_VENDEUR.txt"
+  },
+  "pdf_templates": {},
+  "docx_templates": {}
+}
+

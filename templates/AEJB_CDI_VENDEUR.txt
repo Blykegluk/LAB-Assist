@@ -1,0 +1,109 @@
+CONTRAT DE TRAVAIL A DUREE INDETERMINEE A TEMPS COMPLET
+Entre les soussignés :
+La société : AEJB, Dont le siège social est situé à SURESNES, 14, avenue de la Criolla, 92150. N° SIRET : 85220053400026 Code APE : 4729Z Dont les cotisations de sécurité sociale sont versées à l’URSSAF de PARIS Région Parisienne, 3 rue Franklin – 93518 MONTREUIL Cedex,
+Représentée par Monsieur Anthony BOUSKILA, Président, ayant tous pouvoirs à l’effet des présentes,
+d'une part,
+Et,
+Madame/Monsieur {{Prénom}} {{Nom}},
+Né(e) le {{Date_de_naissance}} en {{Lieu de naissance}},
+Demeurant au {{Adresse}},
+De nationalité {{Nationalité}},
+Dont le numéro national d'immatriculation à la sécurité sociale est le {{Numéro de secu}}.
+d'autre part,
+Il est tout d’abord rappelé ce qui suit :
+La déclaration préalable à l'embauche de {{Prénom}} {{Nom}} a été effectuée à l'URSSAF de Paris.
+Ceci étant rappelé, il a été convenu ce qui suit :
+ARTICLE 1 – Engagement et droit applicable
+Sous réserve d’avoir été déclaré(e) apte à l’issue de la visite médicale, {{Prénom}} {{Nom}} qui déclare formellement n’être lié(e) par aucune autre entreprise et être libre de tout engagement, {{Prénom}} {{Nom}} est engagé(e) en contrat à durée indéterminée à temps complet à compter du {{Date_debut}}, par la société AEJB en qualité de « Vendeur polyvalent » statut non-cadre.
+Le contrat de {{Prénom}} {{Nom}}, au regard de l’activité principale de la société, est régi par les dispositions du Code du Travail, de la Convention collective nationale des Fruits, légumes, épicerie, produits laitiers : commerce de détail (Brochure n°3244), ainsi que par les dispositions contractuelles énoncées ci-après.
+ARTICLE 2 – Période d’essai
+Les parties conviennent d’un commun accord que l’engagement ne sera ferme et définitif qu’à l’expiration d’une période d’essai, de deux mois courant du {{Date_debut}} au {{Date_fin_periode_essai}}.
+Cette période d’essai pourra faire l’objet d’un renouvellement dans les conditions définies dans la Convention collective susmentionnée.
+Au cours de cette période, le contrat pourra être rompu par l'une ou l'autre partie, à tout moment, sans indemnité d’aucune sorte, sous réserve du respect du délai de prévenance prévu aux articles L 1221-25 ou L 1221-26 du Code du travail. Toute rupture de période d'essai, quel qu'en soit l'auteur, sera notifiée par écrit, remis en main propre contre récépissé ou adressée en recommandé avec demande d’avis de réception.
+Toute suspension qui se produirait pendant la période d’essai (maladie, congés, etc.), prolongerait d’autant la durée de cette période, qui doit correspondre à un travail effectif.
+ARTICLE 3 – Avantages sociaux
+{{Prénom}} {{Nom}} bénéficiera de la législation sociale notamment en matière de sécurité sociale et de régime de retraite complémentaire.
+{{Prénom}} {{Nom}} sera affilié(e) aux caisses de retraite, prévoyance et mutuelle en vigueur dans la Société.
+La Société remettra à {{Prénom}} {{Nom}}, l’ensemble de la documentation relative auxdites caisse, à cet effet.
+La mention dans le contrat de travail du statut collectif conventionnel (convention de branche, régime de prévoyance ou de retraite, etc.) applicable dans l'entreprise n'a qu'une valeur informative et ne constitue pas un élément du contrat de travail.
+ARTICLE 4 – Fonctions et lieu de travail
+{{Prénom}} {{Nom}} occupera un emploi de « Vendeur polyvalent » dont la classification conventionnelle, est la suivante : Employé, Niveau E1 :
+A ce titre, {{Prénom}} {{Nom}} exercera les tâches et missions suivantes :
+· Sera sous la responsabilité du responsable du magasin
+· Assurera la vente de détail des produits alimentaires du magasin notamment en accueillant la clientèle. Il sera à son écoute afin de pouvoir lui conseiller le produit le plus adapté à sa demande.
+· Tiendra la caisse (encaissement, ouverture et comptage) pour ses propres ventes ou en renfort selon les besoins
+· Participera au traitement de la livraison de la marchandise, de son réassort ainsi qu’au rangement et en sa mise en rayon
+· Pourra sur demande assurer l’ouverture et la fermeture du magasin, le comptage de caisse en fin de journée
+· Veillera en outre au respect de la chaîne du froid afin que les produits frais ne soient pas détériorés ainsi qu’à la propreté du magasin et de la réserve.
+Cette liste de fonctions n’étant pas exhaustive et par nature évolutive, {{Prénom}} {{Nom}} accepte par avance d’exécuter toute tâche correspondant à sa qualification.
+{{Prénom}} {{Nom}} s’engage également expressément : à être souriant(e), dynamique, cordial(e) avec la clientèle, à observer toutes les instructions et consignes particulières de travail qui lui seront données en particulier en matière de sécurité, d’hygiène…, à accomplir toute formation, à prendre le plus grand soin de tous les objets qui lui seront confiés dans le cadre de son activité : matériels, outils, etc, lesquels resteront la propriété exclusive de l’entreprise et sont réservés à un usage strictement professionnel.
+Cette liste de fonctions n’étant pas exhaustive et par nature évolutive, {{Prénom}} {{Nom}} accepte par avance d’exécuter toute tâche correspondant à sa qualification.
+ARTICLE 5 – Clause de mobilité
+Eu égard à la nature de ses fonctions, {{Prénom}} {{Nom}} pourra être amené(e) à effectuer, sur demande de sa Direction, des déplacements vers les autres magasins de la société AEJB.
+{{Prénom}} {{Nom}} prend l’engagement d’accepter tout changement de lieu de travail nécessité par l’intérêt du fonctionnement de l’entreprise, sur Paris et l’Ile de France, où la société exerce ou exercera ses activités. La mutation de {{Prénom}} {{Nom}}, dans un autre établissement de la société ne constitue pas une modification du contrat de travail.
+ARTICLE 6 - Horaires et durée du travail
+La durée hebdomadaire de travail de 35 heures est fixée conformément aux dispositions légales et conventionnelles.
+{{Prénom}} {{Nom}} exercera ses fonctions dans le cadre de l’horaire collectif de travail affiché et applicable à l’entreprise. A titre indicatif, l’horaire collectif hebdomadaire actuel de travail est de 35 heures.
+La mise en place d’un nouvel horaire collectif de travail ou une nouvelle répartition des heures travaillées dans la journée ne constitue pas une modification du contrat de travail.
+L’accomplissement d’heures supplémentaires – lesquelles correspondent aux seules heures réalisées à la demande de la société – dans les limites légales et conventionnelles constitue une exécution normale du contrat de travail.
+Toute heure supplémentaire doit faire l’objet de l’accord préalable et exprès de son supérieur hiérarchique.
+ARTICLE 7 – Rémunération
+En rémunération de l’accomplissement de ses fonctions, {{Prénom}} {{Nom}} percevra un salaire fixe mensuel brut de 1801,80 euros pour 151,67 heures, soit une durée hebdomadaire de 35 heures.
+A cette rémunération s’ajoutera également, le cas échéant, celle des heures supplémentaires effectuées au cours du mois en sus de l’horaire prévu à l’article 5. Les heures supplémentaires effectuées au-delà de la durée contractuelle donneront lieu à une majoration de salaire selon les taux légaux et conventionnels en vigueur.
+ARTICLE 8 – Congés Payés
+{{Prénom}} {{Nom}} aura droit aux congés payés prévus par les articles L 3141-1 et suivants du Code du travail et par la convention collective applicable dans l'entreprise.
+{{Prénom}} {{Nom}} déterminera la prise de ses congés payés avec sa hiérarchie, en fonction des contraintes de l’entreprise et de ses propres desideratas, les premières primant, en tout état de cause, sur les seconds.
+ARTICLE 9 - Absences
+Toute absence, quelle que soit sa durée, doit faire l’objet d’une justification auprès de l’employeur sans délai et selon tout moyen à sa convenance.
+Par ailleurs, {{Prénom}} {{Nom}} a l’obligation, dans les 48 heures suivant son absence, de fournir à l’employeur tout document écrit justifiant ladite absence et, en particulier, le volet de l’arrêt de travail destiné à l’employeur lorsqu’une prescription médicale d’arrêt de travail est ordonnée.
+{{Prénom}} {{Nom}} s’engage également à communiquer sans délai le décompte des indemnités journalières de sécurité sociale afin de permettre à l’employeur de procéder, le cas échéant, au calcul du complément de salaire dû.
+Tout manquement de sa part à l’obligation d’information et de transmission de documents caractériserait une exécution déloyale du contrat de travail et constituerait une violation de l’obligation de loyauté.
+ARTICLE 10 – Hygiène et sécurité
+{{Prénom}} {{Nom}} s’engage à respecter toute mesure de prévention des risques professionnels et à porter si nécessaire les équipements de protection individuelle mis à sa disposition.
+Toute infraction aux prescriptions relatives à l’hygiène et la sécurité constituerait un manquement à ses obligations contractuelles pouvant faire l’objet de sanctions disciplinaires.
+ARTICLE 11 – Vidéo-surveillance
+Afin d’assurer la sécurité des biens et des personnes, dans l’enceinte de la Société, un système de vidéosurveillance est opérationnel, 24/24 heures, au sein des locaux de celle-ci, qu’il s’agisse de ceux destinés à la clientèle, mais, également, dans ceux accessibles, uniquement, au personnel.
+Les images ainsi enregistrées seront conservées 30 jours.
+Par le biais de ce système et bien que celui-ci n’ait pas cette vocation, la direction de la Société dispose d’images sur lesquelles peuvent, notamment, figurer des salariés, dans l’exercice de leurs fonctions.
+En cas d’incident ou situation litigieuse, lesdites images pourront être utilisées à des fins de contrôle et comme moyen de preuve, dans toute investigation mise en oeuvre à l’encontre d’un collaborateur.
+Le système de vidéo-surveillance a fait l’objet d’une déclaration :
+· auprès de la CNIL,
+· mais également, de la Préfecture,
+dès lors que le magasin est ouvert au public.
+{{Prénom}} {{Nom}} pourra demander, à tout moment, à accéder aux images enregistrées, sur lesquelles il/elle pourrait apparaître et ce, évidemment, pour celles qui seront conservées.
+ARTICLE 12 – Obligation de loyauté
+Conformément à l’article L.1222-1 du Code du travail, le contrat de travail doit être exécuté de bonne foi.
+Cette obligation générale de loyauté, applicable tant pendant l’exécution du contrat de travail que pendant sa suspension pour quelque motif que ce soit, implique que {{Prénom}} {{Nom}} communique à son employeur l’ensemble des documents et informations nécessaires au bon fonctionnement de l’entreprise : communication des décomptes de prestations en espèces servies par la Sécurité sociale, attestation de situation au regard de ses droits à une retraite de base, etc.
+{{Prénom}} {{Nom}} est tenu(e), par ailleurs, de communiquer sans délai toute modification relevant de sa situation personnelle (changement de domicile, modification des coordonnées bancaires, etc.) qui pourrait affecter directement ou indirectement la relation de travail.
+Pendant la durée de son contrat, {{Prénom}} {{Nom}} s'engage également à respecter les instructions qui pourront lui être données par la société.
+{{Prénom}} {{Nom}} doit respecter une obligation générale de discrétion s’agissant de toutes informations qui seront portées à sa connaissance dans le cadre de l’exécution de son contrat de travail, et plus particulièrement à l’égard des personnes extérieures à l’entreprise.
+Le non-respect de l’obligation de loyauté, obligation constituant le socle de son engagement contractuel, pourrait être une cause justifiant la rupture de son contrat de travail.
+ARTICLE 13 – Obligation de discrétion
+{{Prénom}} {{Nom}} s’engage à ne pas dévoiler les informations et les documents dont il/elle aura eu connaissance dans le cadre de ses fonctions tant à l’égard des membres de l’entreprise qu’à l’égard des membres extérieurs de l’entreprise.
+Les informations et documents précités présentent par nature un caractère confidentiel.
+Cette obligation de confidentialité est destinée à protéger le savoir-faire propre à l’entreprise et a vocation à s’appliquer tant pendant l’exécution du contrat du travail qu’après la fin du contrat de travail.
+A défaut de respecter l’obligation décrite ci-dessus, la société pourra poursuivre {{Prénom}} {{Nom}} pour être indemnisée de son préjudice.
+ARTICLE 14 - Propriété de la clientèle
+S'agissant de la clientèle de l'employeur, dont {{Prénom}} {{Nom}} aura eu connaissance et/ou qu'il/elle aura eu à traiter pendant la période d'exécution du présent contrat, celle-ci/celui-ci s'interdit de démarcher cette clientèle, directement ou indirectement, pour son compte personnel ou pour le compte de tiers.
+Le salarié s'interdit de demander ou de noter les noms et adresses des clients qui lui seront confiés. La liste des clients concernés sera celle qui résultera du fichier clients de l’entreprise.
+Le simple fait de la part de {{Prénom}} {{Nom}} d'aviser la clientèle, pendant l'exécution de son contrat de travail, de son changement d'entreprise ou de lui indiquer son installation à son propre compte constitue une faute grave entraînant son congédiement immédiat nonobstant toute poursuite judiciaire en dommages et intérêts.
+{{Prénom}} {{Nom}} ne devra rien faire qui puisse permettre, soit aux fournisseurs, soit aux clients de l'entreprise, soit aux collaborateurs, soit aux tiers, de le considérer comme propriétaire du fonds de commerce ou comme jouissant de prérogatives plus étendues que celles attachées à ses fonctions.
+Toute violation de la présente clause sera portée devant les juridictions compétentes, à charge pour elles de déterminer le montant du préjudice et des dommages et intérêts compensatoires réparant les infractions, en sus de toute interdiction sous astreinte.
+ARTICLE 15 – Exclusivité
+Pendant toute la durée du présent Contrat, {{Prénom}} {{Nom}} s’interdit de s’intéresser, directement ou indirectement, de quelque manière que ce soit et à quelque titre que ce soit, à toute autre société ou entreprise, quelle que soit la forme juridique de celle-ci et/ou son activité.
+ARTICLE 16 – Rupture du contrat de travail
+{{Prénom}} {{Nom}} et la société AEJB peuvent l'un et l'autre rompre à tout moment le contrat de travail en respectant les dispositions légales et conventionnelles en vigueur.
+Le délai de préavis dû par la société AEJB ou par {{Prénom}} {{Nom}} en cas de rupture du Contrat de travail est fixé par les articles L 1234-1 et L 1237-1 du Code du travail ainsi que par la convention collective applicable dans l'entreprise en fonction de l'ancienneté que {{Prénom}} {{Nom}} aura acquis au moment de son départ.
+En outre, la Direction se réserve le droit de mettre fin au contrat immédiatement et sans indemnité en cas de faute grave ou faute lourde du salarié ou encore de force majeure.
+ARTICLE 17 – Attestation sur l’honneur
+{{Prénom}} {{Nom}} déclare être en situation régulière sur le territoire français et donc employable à ce titre par tout employeur.
+{{Prénom}} {{Nom}} prend l’engagement d’informer, sans délai, l’employeur de toute évolution à cet égard.
+Toute fausse déclaration ou toute omission de {{Prénom}} {{Nom}} quant à l’évolution de son statut constitue une faute grave et l’expose à l’obligation de tenir indemne son employeur des conséquences financières négatives qui en résulteraient pour celui-ci.
+Fait à ___Paris_________________________
+Le ______{{Date_debut}}____________________
+En double exemplaire
+Signatures précédées de la mention manuscrite « Lu et approuvé » :
+Pour la société AEJB,
+Monsieur Anthony BOUSKILA, Président
+Pour le salarié,
+_______
