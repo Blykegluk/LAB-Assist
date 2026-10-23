@@ -108,7 +108,16 @@ def _normalize_fields(payload: dict) -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    """Etat du service et de la base (utile pour un moniteur externe)."""
+    db_status = "ok"
+    try:
+        from sqlalchemy import text
+
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:  # base en pause ou injoignable : le site reste servi
+        db_status = f"error: {type(e).__name__}"
+    return {"status": "ok" if db_status == "ok" else "degraded", "db": db_status}
 
 
 @app.post("/extract")
@@ -158,5 +167,12 @@ app.mount("/caisse", StaticFiles(directory=str(frontend_dir / "caisse"), html=Tr
 @app.on_event("startup")
 def on_startup() -> None:
     # Crée les tables si elles n'existent pas (au démarrage de l'app)
-    Base.metadata.create_all(bind=engine)
+    # Ne pas faire tomber tout le service si la base est en pause (ex : projet Supabase gratuit
+    # suspendu) : les pages restent servies et /health signale le problème.
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("app").error("Base de données injoignable au démarrage : %s", e)
     cash_scheduler.start()
