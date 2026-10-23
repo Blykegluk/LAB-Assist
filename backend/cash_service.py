@@ -711,6 +711,47 @@ def next_analysis_label(now: Optional[datetime] = None) -> str:
     return f"demain vers {h}h{m:02d}"
 
 
+def _paris_now() -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
+    except Exception:
+        return datetime.now()
+
+
+def analysis_should_run(db: Session, now: Optional[datetime] = None) -> dict:
+    """La tâche planifiée passe toutes les heures ; elle ne travaille que s'il y a des photos en attente
+    et que c'est l'heure d'un créneau prévu (12h05, 18h05) ou que le gérant a demandé une analyse."""
+    now = now or _paris_now()
+    queued = db.execute(select(CashSubmission).where(CashSubmission.status == "queued")).scalars().all()
+    requested = get_setting(db, "analysis_requested_at")
+    if not queued:
+        return {"run": False, "reason": "aucune photo en attente", "queued": 0, "requested_at": requested}
+    if requested:
+        return {"run": True, "reason": "demande manuelle", "queued": len(queued), "requested_at": requested}
+    if now.hour in {h for h, _ in analysis_times()}:
+        return {"run": True, "reason": "créneau prévu", "queued": len(queued), "requested_at": None}
+    return {"run": False, "reason": "pas de créneau ni de demande", "queued": len(queued), "requested_at": None}
+
+
+def request_analysis(db: Session, who: str) -> dict:
+    queued = db.execute(select(CashSubmission).where(CashSubmission.status == "queued")).scalars().all()
+    if not queued:
+        return {"requested": False, "queued": 0, "message": "Aucune photo en attente d'analyse."}
+    set_setting(db, "analysis_requested_at", datetime.utcnow().isoformat())
+    set_setting(db, "analysis_requested_by", who)
+    nxt = _paris_now().replace(minute=5, second=0, microsecond=0)
+    if nxt <= _paris_now():
+        nxt += timedelta(hours=1)
+    if nxt.hour < 8:
+        nxt = nxt.replace(hour=8)
+    elif nxt.hour > 21:
+        nxt = (nxt + timedelta(days=1)).replace(hour=8)
+    return {"requested": True, "queued": len(queued), "starts_around": f"{nxt.hour}h{nxt.minute:02d}",
+            "message": f"Analyse demandée pour {len(queued)} envoi(s). Elle démarrera vers {nxt.hour}h{nxt.minute:02d}."}
+
+
 def queue_items(db: Session) -> list[dict]:
     subs = db.execute(select(CashSubmission).where(CashSubmission.status == "queued").order_by(CashSubmission.created_at)).scalars().all()
     items = []
@@ -1302,5 +1343,7 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
         "analysis_mode": analysis_mode(),
         "analysis_times": [f"{h}h{m:02d}" for h, m in analysis_times()],
         "last_worker_run_at": get_setting(db, "last_worker_run_at"),
+        "analysis_requested_at": get_setting(db, "analysis_requested_at"),
+        "queued_total": len(db.execute(select(CashSubmission).where(CashSubmission.status == "queued")).scalars().all()),
     }
     return out

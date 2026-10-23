@@ -559,3 +559,48 @@ def test_calendar_neutral_before_first_submission(client):
         db.close()
     lb = d["stores"][0]
     assert lb["kpis"]["missing_days"] == 0 and {c["status"] for c in lb["calendar"]} <= {"before", "closed"}
+
+
+def test_manual_analysis_request(client, monkeypatch):
+    from datetime import datetime as _dt
+    from backend import cash_service as svc
+    from backend.database import SessionLocal
+
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    monkeypatch.delenv("CASH_ANALYSIS_TIMES", raising=False)
+    o = _login(client, "owner-secret")
+    w = _worker_headers()
+    db = SessionLocal()
+    try:
+        # vider la file laissée par les autres tests
+        for item in svc.queue_items(db):
+            sub = db.get(svc.CashSubmission, item["submission_id"])
+            sub.status = "cancelled"
+        db.commit()
+        assert svc.analysis_should_run(db, _dt(2026, 10, 23, 15, 5))["run"] is False
+    finally:
+        db.close()
+    assert client.post("/cash/analysis/request", headers=o).json()["requested"] is False  # rien en attente
+    assert client.post("/cash/analysis/request", headers=_login(client, "2468")).status_code == 403
+
+    sid = _deferred_upload(client, _login(client, "2468"), "leon_blum", ["z.jpg"])["submission_id"]
+    db = SessionLocal()
+    try:
+        assert svc.analysis_should_run(db, _dt(2026, 10, 23, 15, 5))["run"] is False  # hors créneau, pas de demande
+        assert svc.analysis_should_run(db, _dt(2026, 10, 23, 18, 5)) == {"run": True, "reason": "créneau prévu", "queued": 1, "requested_at": None}
+    finally:
+        db.close()
+    r = client.post("/cash/analysis/request", headers=o).json()
+    assert r["requested"] is True and r["queued"] == 1 and "vers" in r["message"]
+    sr = client.get("/cash/worker/should-run", headers=w).json()
+    assert sr["run"] is True and sr["reason"] == "demande manuelle"
+    d = client.get("/cash/dashboard", headers=o).json()["integrations"]
+    assert d["analysis_requested_at"] and d["queued_total"] == 1
+
+    # La tâche traite l'envoi puis lance les contrôles : la demande est soldée
+    doc_id = _queue_item(client, sid)["documents"][0]["id"]
+    client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w,
+                json={"documents": [{"document_id": doc_id, "extraction": {"type": "autre", "confidence": 0.2}}]})
+    client.post("/cash/worker/checks", headers=w)
+    sr = client.get("/cash/worker/should-run", headers=w).json()
+    assert sr["run"] is False and sr["requested_at"] is None

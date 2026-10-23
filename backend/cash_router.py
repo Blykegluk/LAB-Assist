@@ -252,6 +252,18 @@ def manager_recent(store_id: str, user: User = Depends(require_any), db: Session
 
 # ----------------------------------------------------------------------------- tâche d'analyse planifiée
 
+@router.post("/analysis/request")
+def analysis_request(user: User = Depends(require_owner), db: Session = Depends(get_db)):
+    """Bouton « Analyser maintenant » du tableau de bord."""
+    return svc.request_analysis(db, f"{user.label} ({user.id})")
+
+
+@router.get("/worker/should-run")
+def worker_should_run(who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    """Appelé à chaque passage horaire de la tâche : faut-il analyser maintenant ?"""
+    return svc.analysis_should_run(db)
+
+
 @router.get("/worker/queue")
 def worker_queue(who: str = Depends(require_worker), db: Session = Depends(get_db)):
     """Envois en attente d'analyse, avec les liens vers leurs photos."""
@@ -403,6 +415,8 @@ def worker_bank_transactions(payload: BankImportIn, who: str = Depends(require_w
 def worker_checks(who: str = Depends(require_worker), db: Session = Depends(get_db)):
     """Lance les contrôles et le récap e-mail (utile si le serveur a dormi)."""
     svc.set_setting(db, "last_worker_run_at", datetime.utcnow().isoformat())
+    if not db.execute(select(CashSubmission).where(CashSubmission.status == "queued")).scalars().first():
+        svc.set_setting(db, "analysis_requested_at", None)  # demande manuelle satisfaite
     res = svc.run_checks(db)
     return {"ran_at": res["ran_at"], "notified_critical": res.get("notified_critical"), "digest": res.get("digest")}
 

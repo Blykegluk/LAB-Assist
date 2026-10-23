@@ -59,6 +59,8 @@ Clé API par société dans `PENNYLANE_API_KEY_AEJB` / `PENNYLANE_API_KEY_JAB` (
 3. renvoie ses lectures (`POST /cash/worker/submissions/{id}/extractions`) : le site calcule l'écart, enregistre l'envoi et déclenche les alertes et e-mails ;
 4. lance les contrôles (`POST /cash/worker/checks`), ce qui réveille aussi le service Render.
 
+La tâche passe en réalité toutes les heures de 8h05 à 21h05 et demande d'abord `GET /cash/worker/should-run`. Elle ne travaille que s'il y a des photos en attente et que c'est l'heure d'un créneau prévu, ou que le gérant a cliqué « Analyser maintenant » dans le tableau de bord (`POST /cash/analysis/request`). Sinon elle s'arrête aussitôt.
+
 La tâche s'authentifie avec un jeton propre, dérivé de `CASH_SECRET` (ou `CASH_WORKER_TOKEN`), qui ne donne accès qu'à la file d'analyse. Un document d'un autre magasin ou une lecture incomplète n'empêchent pas l'enregistrement : ils créent une alerte pour le gérant, qui peut annuler l'envoi depuis le tableau de bord. Si des photos attendent plus de 14 heures, une alerte « Photos en attente d'analyse » signale que la tâche ne tourne plus.
 
 **Mode `immediate`.** Les photos sont lues à l'envoi par l'API Anthropic (`ANTHROPIC_API_KEY`, payante à l'usage, modèle `claude-opus-5-5`) ou OpenAI (`CASH_VISION_PROVIDER=openai`), et la responsable vérifie les montants avant de confirmer.
