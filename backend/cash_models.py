@@ -4,10 +4,19 @@ from __future__ import annotations
 from datetime import datetime, date
 from typing import Optional
 
-from sqlalchemy import String, Integer, Float, DateTime, Date, Text, Boolean, ForeignKey
+from sqlalchemy import String, Integer, Float, DateTime, Date, Text, Boolean, ForeignKey, LargeBinary
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
+
+
+class CashDocumentBlob(Base):
+    """Contenu des photos gardé en base : le disque des hébergeurs gratuits (Render) s'efface au redémarrage."""
+
+    __tablename__ = "cash_document_blobs"
+
+    document_id: Mapped[int] = mapped_column(Integer, ForeignKey("cash_documents.id"), primary_key=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
 
 
 class CashSubmission(Base):
