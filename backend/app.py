@@ -1,4 +1,4 @@
-﻿import os
+import os
 import pathlib
 from dotenv import load_dotenv
 
@@ -12,6 +12,9 @@ from backend.contracts import router as contracts_router
 from backend.pdf import ensure_generated_dir
 from backend.database import Base, engine
 from backend.recruitment import router as recruitment_router
+from backend import cash_models  # noqa: F401  (tables du module dépôts d'espèces)
+from backend.cash_router import router as cash_router
+from backend import cash_scheduler
 
 
 app = FastAPI(title="ID Card Extractor", version="1.0.0")
@@ -137,6 +140,7 @@ async def read_root():
 # API Contracts
 app.include_router(contracts_router)
 app.include_router(recruitment_router)
+app.include_router(cash_router)
 
 # Serve generated files
 generated_dir = ensure_generated_dir()
@@ -146,8 +150,13 @@ app.mount("/files", StaticFiles(directory=str(generated_dir)), name="files")
 assets_dir = frontend_dir / "assets"
 app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+# Module dépôts d'espèces : PWA de la responsable (/depots) et tableau de bord du gérant (/caisse)
+app.mount("/depots", StaticFiles(directory=str(frontend_dir / "depots"), html=True), name="depots")
+app.mount("/caisse", StaticFiles(directory=str(frontend_dir / "caisse"), html=True), name="caisse")
+
 
 @app.on_event("startup")
 def on_startup() -> None:
     # Crée les tables si elles n'existent pas (au démarrage de l'app)
     Base.metadata.create_all(bind=engine)
+    cash_scheduler.start()

@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dépôts espèces</title>
+  <meta name="description" content="Envoi des dépôts d'espèces et relevés de caisse">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Dépôts">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" href="icon-192.png">
+  <style>
+    :root {
+      --bg: #f1f5f9; --card: #ffffff; --ink: #0f172a; --muted: #64748b; --line: #e2e8f0;
+      --ok: #059669; --warn: #d97706; --bad: #dc2626; --info: #2563eb; --store: #2563eb;
+      --radius: 18px; --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 17px; line-height: 1.4; }
+    body { min-height: 100vh; padding-bottom: env(safe-area-inset-bottom); }
+    .screen { display: none; max-width: 560px; margin: 0 auto; padding: 16px; padding-top: calc(16px + env(safe-area-inset-top)); }
+    .screen.active { display: block; }
+    h1 { font-size: 26px; margin: 8px 0 4px; letter-spacing: -.01em; }
+    h2 { font-size: 20px; margin: 18px 0 8px; }
+    p { margin: 6px 0; }
+    .muted { color: var(--muted); font-size: 15px; }
+    .card { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.05); margin: 12px 0; }
+    button { font-family: inherit; font-size: 18px; font-weight: 700; border: 0; border-radius: 16px; padding: 18px 20px; width: 100%; cursor: pointer; color: #fff; background: var(--store); min-height: 60px; transition: transform .05s ease, opacity .2s; }
+    button:active { transform: scale(.98); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.secondary { background: #fff; color: var(--ink); border: 2px solid var(--line); }
+    button.ghost { background: transparent; color: var(--muted); font-weight: 600; min-height: 48px; padding: 12px; }
+    button.danger { background: var(--bad); }
+    button.ok { background: var(--ok); }
+    .store-btn { min-height: 120px; font-size: 28px; margin: 14px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+    .store-btn small { font-size: 15px; font-weight: 500; opacity: .9; }
+    .banner { background: var(--store); color: #fff; border-radius: var(--radius); padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .banner .name { font-size: 24px; font-weight: 800; letter-spacing: .01em; }
+    .banner .sub { font-size: 13px; opacity: .9; }
+    .banner a { color: #fff; font-size: 14px; font-weight: 700; text-decoration: underline; white-space: nowrap; }
+    .pin { font-size: 32px; letter-spacing: .4em; text-align: center; width: 100%; padding: 16px; border: 2px solid var(--line); border-radius: 16px; font-family: inherit; }
+    input[type=text], input[type=date], input[type=number], textarea { font-family: inherit; font-size: 17px; width: 100%; padding: 12px; border: 2px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); }
+    label { display: block; font-size: 13px; color: var(--muted); font-weight: 600; margin: 8px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+    .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .thumb { position: relative; aspect-ratio: 3/4; border-radius: 12px; overflow: hidden; background: #cbd5e1; }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb .pdf { display: flex; align-items: center; justify-content: center; height: 100%; font-weight: 800; color: #334155; }
+    .thumb .rm { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: 50%; background: rgba(15,23,42,.75); font-size: 16px; line-height: 30px; }
+    .hidden { display: none !important; }
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+    .kv { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .kv:last-child { border-bottom: 0; }
+    .kv .k { color: var(--muted); font-size: 15px; }
+    .kv .v { font-weight: 800; font-size: 20px; font-variant-numeric: tabular-nums; }
+    .ecart-ok { color: var(--ok); } .ecart-bad { color: var(--bad); } .ecart-warn { color: var(--warn); }
+    .issue { display: flex; gap: 10px; padding: 10px 12px; border-radius: 12px; margin: 8px 0; font-size: 15px; }
+    .issue.block { background: #fee2e2; color: #7f1d1d; } .issue.warning { background: #fef3c7; color: #78350f; } .issue.info { background: #e0f2fe; color: #0c4a6e; }
+    .doc { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+    .doc:last-child { border-bottom: 0; }
+    .doc .ico { width: 36px; height: 36px; border-radius: 10px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 18px; flex: none; }
+    .doc .tag { margin-left: auto; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: #e2e8f0; color: #334155; white-space: nowrap; }
+    .doc .tag.ok { background: #d1fae5; color: #065f46; } .doc .tag.bad { background: #fee2e2; color: #991b1b; } .doc .tag.unk { background: #f1f5f9; color: #64748b; }
+    .spinner { width: 54px; height: 54px; border: 6px solid #e2e8f0; border-top-color: var(--store); border-radius: 50%; animation: spin 1s linear infinite; margin: 24px auto; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .big-check { width: 96px; height: 96px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 56px; display: flex; align-items: center; justify-content: center; margin: 24px auto 8px; }
+    .center { text-align: center; }
+    .toast { position: fixed; left: 16px; right: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); background: #0f172a; color: #fff; padding: 14px 16px; border-radius: 14px; font-size: 15px; display: none; z-index: 50; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+    details summary { cursor: pointer; font-weight: 700; color: var(--info); padding: 8px 0; }
+    .recent { font-size: 15px; }
+    .recent li { padding: 8px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; }
+    .recent li:last-child { border-bottom: 0; }
+    .amount { font-variant-numeric: tabular-nums; font-weight: 700; }
+    .edit-block { border: 1px dashed var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+    .edit-block .title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+    .actions { padding: 8px 0 calc(16px + env(safe-area-inset-bottom)); }
+    .sticky { position: sticky; bottom: 0; background: linear-gradient(to top, var(--bg) 70%, transparent); padding: 12px 0 calc(8px + env(safe-area-inset-bottom)); }
+  </style>
+</head>
+<body>
+
+<!-- ÉCRAN 0 : code -->
+<section id="s-login" class="screen">
+  <div class="center" style="margin-top:40px">
+    <div style="font-size:52px">💶</div>
+    <h1>Dépôts d'espèces</h1>
+    <p class="muted">Entre ton code pour commencer.</p>
+  </div>
+  <div class="card">
+    <input id="pin" class="pin" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="••••">
+    <div style="height:12px"></div>
+    <button id="btn-login">Entrer</button>
+    <p id="login-err" class="muted center" style="color:var(--bad)"></p>
+  </div>
+</section>
+
+<!-- ÉCRAN 1 : choix du magasin -->
+<section id="s-store" class="screen">
+  <h1>Quel magasin ?</h1>
+  <p class="muted">Choisis le magasin <b>avant</b> d'envoyer tes photos. Les documents seront rattachés à ce magasin.</p>
+  <div id="store-list"></div>
+  <button class="ghost" id="btn-logout">Changer de code</button>
+</section>
+
+<!-- ÉCRAN 2 : photos -->
+<section id="s-upload" class="screen">
+  <div class="banner">
+    <div><div class="sub">Magasin sélectionné</div><div class="name" id="u-store-name">—</div></div>
+    <a href="#" data-go="store">Changer</a>
+  </div>
+  <div class="card">
+    <h2 style="margin-top:0">Ajoute tes photos</h2>
+    <p class="muted">Pour chaque dépôt : le <b>relevé de caisse</b> (page avec les espèces), le <b>bordereau</b> de la banque et le <b>ticket de l'automate</b>. Une photo par document, bien à plat et nette.</p>
+    <input id="file-camera" type="file" accept="image/*" capture="environment" class="hidden">
+    <input id="file-gallery" type="file" accept="image/*,application/pdf" multiple class="hidden">
+    <div class="row" style="margin-top:12px">
+      <button class="secondary" id="btn-camera">📷 Photo</button>
+      <button class="secondary" id="btn-gallery">🖼️ Galerie</button>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+  <div class="sticky">
+    <button id="btn-analyze" disabled>Analyser les documents</button>
+  </div>
+  <div class="card recent" id="recent-card">
+    <b>Derniers envois pour ce magasin</b>
+    <ul id="recent" style="list-style:none;padding:0;margin:8px 0 0"></ul>
+  </div>
+</section>
+
+<!-- ÉCRAN 3 : analyse en cours -->
+<section id="s-wait" class="screen">
+  <div class="banner"><div><div class="sub">Magasin sélectionné</div><div class="name" id="w-store-name">—</div></div></div>
+  <div class="card center">
+    <div class="spinner"></div>
+    <h2 style="margin:0">Analyse en cours…</h2>
+    <p class="muted">Lecture des montants et des dates. Cela prend quelques secondes.</p>
+  </div>
+</section>
+
+<!-- ÉCRAN 4 : vérification -->
+<section id="s-review" class="screen">
+  <div class="banner">
+    <div><div class="sub">Magasin sélectionné</div><div class="name" id="r-store-name">—</div></div>
+  </div>
+  <div id="issues"></div>
+  <div class="card" id="summary"></div>
+  <div class="card">
+    <b>Documents reconnus</b>
+    <div id="docs"></div>
+  </div>
+  <div class="card">
+    <details id="edit-details">
+      <summary>Corriger un montant ou une date</summary>
+      <div id="edit"></div>
+    </details>
+  </div>
+  <div class="card">
+    <label for="note">Remarque (facultatif)</label>
+    <textarea id="note" rows="2" placeholder="Ex : il manquait 20 € dans la caisse 2"></textarea>
+  </div>
+  <div class="actions">
+    <button id="btn-confirm" class="ok">Confirmer l'envoi</button>
+    <div style="height:8px"></div>
+    <button class="secondary" id="btn-wrong-store">Mauvais magasin → changer</button>
+    <button class="ghost" id="btn-cancel">Annuler cet envoi</button>
+  </div>
+</section>
+
+<!-- ÉCRAN 5 : terminé -->
+<section id="s-done" class="screen">
+  <div class="center">
+    <div class="big-check">✓</div>
+    <h1>C'est enregistré</h1>
+    <p class="muted" id="done-text"></p>
+  </div>
+  <div class="card" id="done-summary"></div>
+  <button id="btn-new">Nouveau dépôt</button>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const API = '';
+  const state = { token: localStorage.getItem('cash_token') || '', stores: [], store: null, files: [], submissionId: null, analysis: null };
+  const EUR = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+  const FRD = (iso) => { if (!iso) return '—'; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
+  const KIND = { releve_storemate: ['🧾', 'Relevé de caisse'], releve_orika: ['🧾', 'Rapport Orika'], bordereau: ['🏦', 'Bordereau banque'], recu_gab: ['🎫', 'Ticket automate'], facture: ['🧾', 'Facture espèces'], autre: ['❓', 'Non reconnu'] };
+
+  let toastTimer;
+  function toast(msg, ms = 3500) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', ms); }
+  function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); $('#s-' + id).classList.add('active'); window.scrollTo(0, 0); }
+  function setStoreColor(c) { document.documentElement.style.setProperty('--store', c || '#2563eb'); document.querySelector('meta[name=theme-color]').setAttribute('content', c || '#0f172a'); }
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({}, opts.headers || {}, state.token ? { Authorization: 'Bearer ' + state.token } : {});
+    const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+    if (res.status === 401) { state.token = ''; localStorage.removeItem('cash_token'); show('login'); throw new Error('Connexion requise'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('Erreur ' + res.status));
+    return data;
+  }
+
+  // ---------- connexion
+  $('#btn-login').onclick = async () => {
+    $('#login-err').textContent = '';
+    try {
+      const d = await api('/cash/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: $('#pin').value }) });
+      state.token = d.token; localStorage.setItem('cash_token', d.token); $('#pin').value = '';
+      await loadStores(); show('store');
+    } catch (e) { $('#login-err').textContent = e.message === 'Code incorrect' ? 'Code incorrect, réessaie.' : e.message; }
+  };
+  $('#pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-login').click(); });
+  $('#btn-logout').onclick = () => { state.token = ''; localStorage.removeItem('cash_token'); show('login'); };
+
+  // ---------- magasins
+  async function loadStores() {
+    const d = await api('/cash/stores');
+    state.stores = d.stores;
+    const list = $('#store-list'); list.innerHTML = '';
+    for (const s of d.stores) {
+      const b = document.createElement('button');
+      b.className = 'store-btn'; b.style.background = s.color;
+      b.innerHTML = `<span>${s.label}</span><small>${s.entity || ''}</small>`;
+      b.onclick = () => chooseStore(s);
+      list.appendChild(b);
+    }
+  }
+  async function chooseStore(s) {
+    state.store = s; state.files = []; renderThumbs(); setStoreColor(s.color);
+    for (const id of ['u', 'w', 'r']) $('#' + id + '-store-name').textContent = s.label;
+    show('upload'); loadRecent();
+  }
+  document.querySelectorAll('[data-go=store]').forEach(a => a.onclick = (e) => { e.preventDefault(); show('store'); });
+
+  async function loadRecent() {
+    const ul = $('#recent'); ul.innerHTML = '<li class="muted">Chargement…</li>';
+    try {
+      const d = await api('/cash/manager/recent?store_id=' + encodeURIComponent(state.store.id));
+      ul.innerHTML = d.items.length ? '' : '<li class="muted">Aucun envoi pour l\'instant.</li>';
+      for (const it of d.items) {
+        const li = document.createElement('li');
+        li.innerHTML = `<span>${it.period || '—'}</span><span class="amount">${it.deposit_amount != null ? EUR(it.deposit_amount) : 'sans dépôt'}</span>`;
+        ul.appendChild(li);
+      }
+    } catch (e) { ul.innerHTML = '<li class="muted">Historique indisponible.</li>'; }
+  }
+
+  // ---------- photos
+  $('#btn-camera').onclick = () => $('#file-camera').click();
+  $('#btn-gallery').onclick = () => $('#file-gallery').click();
+  function addFiles(list) {
+    for (const f of list) { if (state.files.length >= 12) { toast('12 fichiers maximum par envoi'); break; } state.files.push(f); }
+    renderThumbs();
+  }
+  $('#file-camera').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  $('#file-gallery').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+  function renderThumbs() {
+    const box = $('#thumbs'); box.innerHTML = '';
+    state.files.forEach((f, i) => {
+      const d = document.createElement('div'); d.className = 'thumb';
+      if (f.type === 'application/pdf') d.innerHTML = '<div class="pdf">PDF</div>';
+      else { const img = document.createElement('img'); img.src = URL.createObjectURL(f); img.onload = () => URL.revokeObjectURL(img.src); d.appendChild(img); }
+      const rm = document.createElement('button'); rm.className = 'rm'; rm.textContent = '✕'; rm.setAttribute('aria-label', 'Retirer'); rm.onclick = () => { state.files.splice(i, 1); renderThumbs(); };
+      d.appendChild(rm); box.appendChild(d);
+    });
+    $('#btn-analyze').disabled = state.files.length === 0;
+    $('#btn-analyze').textContent = state.files.length ? `Analyser ${state.files.length} document${state.files.length > 1 ? 's' : ''}` : 'Analyser les documents';
+  }
+
+  // ---------- analyse
+  $('#btn-analyze').onclick = async () => {
+    if (!state.store || !state.files.length) return;
+    show('wait');
+    const fd = new FormData();
+    fd.append('store_id', state.store.id);
+    for (const f of state.files) fd.append('files', f, f.name || 'photo.jpg');
+    try {
+      const d = await api('/cash/submissions', { method: 'POST', body: fd });
+      state.submissionId = d.submission_id; state.analysis = d.analysis;
+      renderReview(); show('review');
+    } catch (e) {
+      toast('Envoi impossible : ' + e.message + '. Tes photos sont conservées, réessaie.', 6000);
+      show('upload');
+    }
+  };
+
+  function ecartClass(a) { if (a.ecart === null || a.ecart === undefined) return ''; return a.ecart_alert ? 'ecart-bad' : (Math.abs(a.ecart) >= 5 ? 'ecart-warn' : 'ecart-ok'); }
+
+  function renderReview() {
+    const a = state.analysis;
+    const issues = $('#issues'); issues.innerHTML = '';
+    for (const i of a.issues || []) {
+      const d = document.createElement('div'); d.className = 'issue ' + i.level;
+      d.innerHTML = `<span>${i.level === 'block' ? '⛔' : i.level === 'warning' ? '⚠️' : 'ℹ️'}</span><span>${i.message}</span>`;
+      issues.appendChild(d);
+    }
+    const period = a.coverage && a.coverage.days && a.coverage.days.length ? (a.coverage.days.length === 1 ? 'le ' + FRD(a.coverage.days[0]) : 'du ' + FRD(a.coverage.days[0]) + ' au ' + FRD(a.coverage.days[a.coverage.days.length - 1])) : 'période non lue';
+    const ec = a.ecart;
+    $('#summary').innerHTML = `
+      <div class="muted">Journées couvertes : <b>${period}</b></div>
+      <div class="kv"><span class="k">Espèces encaissées</span><span class="v">${EUR(a.cash_collected)}</span></div>
+      ${a.expenses_total ? `<div class="kv"><span class="k">Factures payées en espèces</span><span class="v">− ${EUR(a.expenses_total)}</span></div>` : ''}
+      <div class="kv"><span class="k">Déposé à la banque</span><span class="v">${EUR(a.deposit_amount)}</span></div>
+      <div class="kv"><span class="k">Écart</span><span class="v ${ecartClass(a)}">${ec === null || ec === undefined ? '—' : (ec > 0 ? '− ' : ec < 0 ? '+ ' : '') + EUR(Math.abs(ec))}</span></div>
+      ${ec !== null && ec !== undefined ? `<p class="muted" style="margin-top:8px">${a.ecart_alert ? 'Écart supérieur au seuil : une alerte sera envoyée au gérant. Tu peux confirmer quand même et ajouter une remarque.' : (ec > 0 ? 'Il reste normalement des pièces au coffre.' : ec < 0 ? 'Dépôt supérieur aux espèces encaissées.' : 'Tout correspond.')}</p>` : ''}
+    `;
+    const docs = $('#docs'); docs.innerHTML = '';
+    for (const d of a.documents || []) {
+      const [ico, lab] = KIND[d.kind] || KIND.autre;
+      const tag = d.store_check === 'ok' ? `<span class="tag ok">${state.store.label}</span>` : d.store_check === 'mismatch' ? `<span class="tag bad">${d.detected_store || 'autre magasin'}</span>` : `<span class="tag unk">${d.kind === 'recu_gab' || d.kind === 'facture' ? 'magasin non indiqué' : 'magasin non lu'}</span>`;
+      const el = document.createElement('div'); el.className = 'doc';
+      el.innerHTML = `<div class="ico">${ico}</div><div>${lab}${d.confidence != null && d.confidence < 0.6 ? ' <span class="muted">(lecture incertaine)</span>' : ''}</div>${tag}`;
+      docs.appendChild(el);
+    }
+    renderEdit();
+    $('#note').value = '';
+    const blocked = !!a.blocked;
+    $('#btn-confirm').disabled = blocked;
+    $('#btn-confirm').textContent = blocked ? 'Confirmation impossible (mauvais magasin)' : "Confirmer l'envoi";
+    $('#btn-wrong-store').classList.toggle('hidden', !blocked);
+    if (!blocked && (a.issues || []).some(i => i.level === 'warning' || (a.documents || []).some(d => d.confidence != null && d.confidence < 0.6))) $('#edit-details').open = true;
+  }
+
+  function renderEdit() {
+    const a = state.analysis; const box = $('#edit'); box.innerHTML = '';
+    (a.reports || []).forEach((r, i) => {
+      box.insertAdjacentHTML('beforeend', `<div class="edit-block"><div class="title">Relevé de caisse ${a.reports.length > 1 ? i + 1 : ''}</div>
+        <div class="row"><div><label>Du</label><input type="date" data-k="reports.${i}.period_start" value="${r.period_start || ''}"></div><div><label>Au</label><input type="date" data-k="reports.${i}.period_end" value="${r.period_end || ''}"></div></div>
+        <label>Espèces encaissées (€)</label><input type="number" step="0.01" inputmode="decimal" data-k="reports.${i}.cash_amount" value="${r.cash_amount ?? ''}"></div>`);
+    });
+    (a.deposits || []).forEach((d, i) => {
+      box.insertAdjacentHTML('beforeend', `<div class="edit-block"><div class="title">Dépôt ${a.deposits.length > 1 ? i + 1 : ''} ${d.bag_number ? '· sac ' + d.bag_number : ''}</div>
+        <div class="row"><div><label>Date du dépôt</label><input type="date" data-k="deposits.${i}.deposit_date" value="${d.deposit_date || ''}"></div><div><label>Montant (€)</label><input type="number" step="0.01" inputmode="decimal" data-k="deposits.${i}.amount" value="${d.amount ?? ''}"></div></div></div>`);
+    });
+    (a.expenses || []).forEach((e, i) => {
+      box.insertAdjacentHTML('beforeend', `<div class="edit-block"><div class="title">Facture espèces ${i + 1}</div>
+        <div class="row"><div><label>Date</label><input type="date" data-k="expenses.${i}.date" value="${e.date || ''}"></div><div><label>Montant (€)</label><input type="number" step="0.01" inputmode="decimal" data-k="expenses.${i}.amount" value="${e.amount ?? ''}"></div></div>
+        <label>Libellé</label><input type="text" data-k="expenses.${i}.label" value="${(e.label || '').replace(/"/g, '&quot;')}"></div>`);
+    });
+    if (!box.children.length) box.innerHTML = '<p class="muted">Rien à corriger : aucun montant n\'a été lu.</p>';
+    box.querySelectorAll('input').forEach(inp => inp.addEventListener('change', () => {
+      const [coll, idx, key] = inp.dataset.k.split('.');
+      const v = inp.type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+      state.analysis[coll][Number(idx)][key] = v;
+      recomputeLocal(); renderSummaryOnly();
+    }));
+  }
+  function recomputeLocal() {
+    const a = state.analysis;
+    const sum = (arr, k) => (arr || []).reduce((s, x) => s + (Number(x[k]) || 0), 0);
+    const cash = sum(a.reports, 'cash_amount'), exp = sum(a.expenses, 'amount'), dep = sum(a.deposits, 'amount');
+    a.cash_collected = Math.round(cash * 100) / 100; a.expenses_total = Math.round(exp * 100) / 100;
+    a.expected_amount = a.reports && a.reports.length ? Math.round((cash - exp) * 100) / 100 : null;
+    a.deposit_amount = a.deposits && a.deposits.length ? Math.round(dep * 100) / 100 : null;
+    a.ecart = (a.expected_amount !== null && a.deposit_amount !== null) ? Math.round((a.expected_amount - a.deposit_amount) * 100) / 100 : null;
+    a.ecart_alert = a.ecart !== null && Math.abs(a.ecart) >= (a.threshold || 10);
+    const days = new Set();
+    for (const r of a.reports || []) { if (r.period_start && r.period_end) { let d = new Date(r.period_start); const e = new Date(r.period_end); let n = 0; while (d <= e && n < 62) { days.add(d.toISOString().slice(0, 10)); d.setDate(d.getDate() + 1); n++; } } }
+    a.coverage = Object.assign({}, a.coverage, { days: [...days].sort() });
+  }
+  function renderSummaryOnly() { const open = $('#edit-details').open; const note = $('#note').value; renderReview(); $('#edit-details').open = open; $('#note').value = note; }
+
+  // ---------- confirmation
+  $('#btn-confirm').onclick = async () => {
+    const a = state.analysis; $('#btn-confirm').disabled = true; $('#btn-confirm').textContent = 'Enregistrement…';
+    try {
+      const d = await api(`/cash/submissions/${state.submissionId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reports: a.reports, deposits: a.deposits, expenses: a.expenses, note: $('#note').value || null }) });
+      const s = d.submission;
+      $('#done-text').textContent = `${state.store.label} · ${s.period || ''}`;
+      $('#done-summary').innerHTML = `
+        <div class="kv"><span class="k">Espèces encaissées</span><span class="v">${EUR(s.expected_amount)}</span></div>
+        <div class="kv"><span class="k">Déposé</span><span class="v">${EUR(s.deposit_amount)}</span></div>
+        <div class="kv"><span class="k">Écart</span><span class="v ${ecartClass(a)}">${s.ecart === null ? '—' : EUR(s.ecart)}</span></div>
+        ${d.alerts && d.alerts.length ? `<p class="muted" style="margin-top:8px">Le gérant a été prévenu (${d.alerts.length} alerte${d.alerts.length > 1 ? 's' : ''}).</p>` : '<p class="muted" style="margin-top:8px">Aucune alerte.</p>'}`;
+      state.files = []; renderThumbs(); show('done');
+    } catch (e) { toast(e.message, 6000); $('#btn-confirm').disabled = false; $('#btn-confirm').textContent = "Confirmer l'envoi"; }
+  };
+  $('#btn-cancel').onclick = async () => { try { await api(`/cash/submissions/${state.submissionId}/cancel`, { method: 'POST' }); } catch (e) {} toast('Envoi annulé'); show('upload'); };
+  $('#btn-wrong-store').onclick = async () => { try { await api(`/cash/submissions/${state.submissionId}/cancel`, { method: 'POST' }); } catch (e) {} show('store'); };
+  $('#btn-new').onclick = () => { state.files = []; renderThumbs(); show('store'); };
+
+  // ---------- démarrage
+  (async () => {
+    if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch (e) {} }
+    if (!state.token) { show('login'); return; }
+    try { await api('/cash/me'); await loadStores(); show('store'); } catch (e) { show('login'); }
+  })();
+})();
+</script>
+</body>
+</html>
