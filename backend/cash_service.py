@@ -568,7 +568,7 @@ def send_digest(db: Session, force: bool = False) -> dict:
 
 # ----------------------------------------------------------------------------- confirmation d'un envoi
 
-def confirm_submission(db: Session, sub: CashSubmission, payload: dict, role: str) -> dict:
+def confirm_submission(db: Session, sub: CashSubmission, payload: dict, role: str, who: Optional[str] = None) -> dict:
     store = store_by_id(sub.store_id)
     if not store:
         raise ValueError("Magasin inconnu")
@@ -626,7 +626,7 @@ def confirm_submission(db: Session, sub: CashSubmission, payload: dict, role: st
 
     sub.status = "confirmed"
     sub.confirmed_at = datetime.utcnow()
-    sub.submitted_by = role
+    sub.submitted_by = who or role
     sub.note = (payload.get("note") or sub.note or None)
     sub.expected_amount = analysis.get("expected_amount")
     sub.deposit_amount = analysis.get("deposit_amount")
@@ -1042,5 +1042,7 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
         "sheets": SheetsClient.configured(),
         "pennylane": {s["id"]: cash_bank.configured(s.get("entity")) for s in config_stores()},
         "vision_mock": __import__("os").getenv("CASH_MOCK_EXTRACTION", "") in ("1", "true", "yes"),
+        "vision_provider": (__import__("os").getenv("CASH_VISION_PROVIDER") or "anthropic").lower(),
+        "vision_key": bool(__import__("os").getenv("ANTHROPIC_API_KEY") or __import__("os").getenv("ANTHROPIC_AUTH_TOKEN")) if (__import__("os").getenv("CASH_VISION_PROVIDER") or "anthropic").lower() == "anthropic" else bool(__import__("os").getenv("OPENAI_API_KEY")),
     }
     return out

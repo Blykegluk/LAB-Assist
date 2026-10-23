@@ -88,10 +88,13 @@
   <div class="center" style="margin-top:40px">
     <div style="font-size:52px">💶</div>
     <h1>Dépôts d'espèces</h1>
-    <p class="muted">Entre ton code pour commencer.</p>
+    <p class="muted">Entre ton identifiant et ton code pour commencer.</p>
   </div>
   <div class="card">
-    <input id="pin" class="pin" type="password" inputmode="numeric" autocomplete="one-time-code" placeholder="••••">
+    <label for="uid">Identifiant</label>
+    <input id="uid" class="pin" type="text" inputmode="numeric" autocomplete="username" placeholder="2" style="letter-spacing:.1em">
+    <label for="pin">Code</label>
+    <input id="pin" class="pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="••••">
     <div style="height:12px"></div>
     <button id="btn-login">Entrer</button>
     <p id="login-err" class="muted center" style="color:var(--bad)"></p>
@@ -201,7 +204,7 @@
   async function api(path, opts = {}) {
     const headers = Object.assign({}, opts.headers || {}, state.token ? { Authorization: 'Bearer ' + state.token } : {});
     const res = await fetch(API + path, Object.assign({}, opts, { headers }));
-    if (res.status === 401) { state.token = ''; localStorage.removeItem('cash_token'); show('login'); throw new Error('Connexion requise'); }
+    if (res.status === 401 && !path.startsWith('/cash/auth')) { state.token = ''; localStorage.removeItem('cash_token'); show('login'); throw new Error('Connexion requise'); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || ('Erreur ' + res.status));
     return data;
@@ -211,12 +214,14 @@
   $('#btn-login').onclick = async () => {
     $('#login-err').textContent = '';
     try {
-      const d = await api('/cash/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: $('#pin').value }) });
-      state.token = d.token; localStorage.setItem('cash_token', d.token); $('#pin').value = '';
+      const d = await api('/cash/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: $('#uid').value, code: $('#pin').value }) });
+      state.token = d.token; localStorage.setItem('cash_token', d.token); $('#pin').value = ''; localStorage.setItem('cash_uid', $('#uid').value);
       await loadStores(); show('store');
-    } catch (e) { $('#login-err').textContent = e.message === 'Code incorrect' ? 'Code incorrect, réessaie.' : e.message; }
+    } catch (e) { $('#login-err').textContent = e.message.includes('incorrect') ? 'Identifiant ou code incorrect, réessaie.' : e.message; }
   };
   $('#pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-login').click(); });
+  $('#uid').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#pin').focus(); });
+  try { $('#uid').value = localStorage.getItem('cash_uid') || ''; } catch (e) {}
   $('#btn-logout').onclick = () => { state.token = ''; localStorage.removeItem('cash_token'); show('login'); };
 
   // ---------- magasins

@@ -1,9 +1,12 @@
-"""Authentification minimaliste : un code PIN pour la responsable, un mot de passe pour le gérant.
+"""Authentification minimaliste : identifiant + code, sans session serveur (jetons signés HMAC).
 
-Jetons signés HMAC, sans session serveur. Variables d'env :
-  CASH_MANAGER_PIN      code de la responsable (défaut: 1234, à changer !)
-  CASH_OWNER_PASSWORD   mot de passe du gérant (défaut: admin, à changer !)
-  CASH_SECRET           secret de signature des jetons
+Comptes définis dans la variable d'env CASH_USERS, au format
+    identifiant:code:role[:libellé],identifiant:code:role[:libellé],...
+avec role = owner (gérant, accès au tableau de bord) ou manager (responsable, envoi des dépôts).
+Exemple :  CASH_USERS="1:8626:owner:Anthony,2:1234:manager:Responsable,3:1234:manager:Adjoint"
+
+Sans CASH_USERS, les comptes par défaut ci-dessous sont utilisés (gérant 1/8626, responsable 2/1234).
+CASH_SECRET signe les jetons (mettre une longue chaîne aléatoire en production).
 """
 from __future__ import annotations
 
@@ -13,86 +16,96 @@ import hmac
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import HTTPException, Request
 
 log = logging.getLogger("cash.auth")
 
 TOKEN_TTL = 60 * 60 * 24 * 90  # 90 jours : la responsable ne doit pas ressaisir son code
+DEFAULT_USERS = "1:8626:owner:Anthony,2:1234:manager:Responsable"
+ROLES = ("owner", "manager")
+
+
+@dataclass(frozen=True)
+class User:
+    id: str
+    code: str
+    role: str
+    label: str
+
+
+def users() -> dict[str, User]:
+    raw = os.getenv("CASH_USERS") or DEFAULT_USERS
+    if not os.getenv("CASH_USERS"):
+        log.warning("CASH_USERS non défini : comptes par défaut utilisés")
+    out: dict[str, User] = {}
+    for item in raw.split(","):
+        parts = [p.strip() for p in item.strip().split(":")]
+        if len(parts) < 3 or parts[2] not in ROLES or not parts[0] or not parts[1]:
+            if item.strip():
+                log.warning("Entrée CASH_USERS ignorée : %r", item)
+            continue
+        label = parts[3] if len(parts) > 3 and parts[3] else ("Gérant" if parts[2] == "owner" else "Responsable")
+        out[parts[0]] = User(id=parts[0], code=parts[1], role=parts[2], label=label)
+    return out
 
 
 def _secret() -> bytes:
-    s = os.getenv("CASH_SECRET") or (os.getenv("CASH_OWNER_PASSWORD") or "lab-assist-dev-secret")
+    s = os.getenv("CASH_SECRET") or ("lab-assist-dev-secret:" + (os.getenv("CASH_USERS") or DEFAULT_USERS))
     return s.encode("utf-8")
 
 
-def _manager_pin() -> str:
-    v = os.getenv("CASH_MANAGER_PIN")
-    if not v:
-        log.warning("CASH_MANAGER_PIN non défini : PIN par défaut 1234 utilisé")
-        return "1234"
-    return v
-
-
-def _owner_password() -> str:
-    v = os.getenv("CASH_OWNER_PASSWORD")
-    if not v:
-        log.warning("CASH_OWNER_PASSWORD non défini : mot de passe par défaut 'admin' utilisé")
-        return "admin"
-    return v
-
-
-def role_for_code(code: str) -> Optional[str]:
-    code = (code or "").strip()
-    if not code:
+def authenticate(user_id: str, code: str) -> Optional[User]:
+    u = users().get((user_id or "").strip())
+    if not u:
         return None
-    if hmac.compare_digest(code, _owner_password()):
-        return "owner"
-    if hmac.compare_digest(code, _manager_pin()):
-        return "manager"
-    return None
+    if not hmac.compare_digest((code or "").strip(), u.code):
+        return None
+    return u
 
 
-def make_token(role: str) -> str:
+def make_token(user: User) -> str:
     exp = int(time.time()) + TOKEN_TTL
-    payload = f"{role}:{exp}".encode("utf-8")
+    payload = f"{user.id}|{user.role}|{exp}".encode("utf-8")
     sig = hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
-    return base64.urlsafe_b64encode(payload + b":" + sig.encode("ascii")).decode("ascii")
+    return base64.urlsafe_b64encode(payload + b"|" + sig.encode("ascii")).decode("ascii")
 
 
-def parse_token(token: str) -> Optional[str]:
+def parse_token(token: str) -> Optional[User]:
     try:
         raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
-        role, exp, sig = raw.split(":", 2)
-        payload = f"{role}:{exp}".encode("utf-8")
+        uid, role, exp, sig = raw.split("|", 3)
+        payload = f"{uid}|{role}|{exp}".encode("utf-8")
         expected = hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected):
+        if not hmac.compare_digest(sig, expected) or int(exp) < time.time():
             return None
-        if int(exp) < time.time():
-            return None
-        if role not in ("manager", "owner"):
-            return None
-        return role
+        u = users().get(uid)
+        if not u or u.role != role:
+            return None  # compte supprimé ou rôle modifié depuis l'émission du jeton
+        return u
     except Exception:
         return None
 
 
-def current_role(request: Request) -> Optional[str]:
+def current_user(request: Request) -> Optional[User]:
     auth = request.headers.get("authorization") or ""
     token = auth[7:] if auth.lower().startswith("bearer ") else request.query_params.get("token", "")
     return parse_token(token) if token else None
 
 
-def require_any(request: Request) -> str:
-    role = current_role(request)
-    if not role:
+def require_any(request: Request) -> User:
+    u = current_user(request)
+    if not u:
         raise HTTPException(status_code=401, detail="Connexion requise")
-    return role
+    return u
 
 
-def require_owner(request: Request) -> str:
-    role = current_role(request)
-    if role != "owner":
+def require_owner(request: Request) -> User:
+    u = current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="Connexion requise")
+    if u.role != "owner":
         raise HTTPException(status_code=403, detail="Réservé au gérant")
-    return role
+    return u

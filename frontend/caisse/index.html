@@ -96,8 +96,10 @@
     <div class="card">
       <h2>Suivi des espèces</h2>
       <p class="muted">Accès réservé au gérant.</p>
-      <label for="pwd">Mot de passe</label>
-      <input id="pwd" type="password" autocomplete="current-password">
+      <label for="uid">Identifiant</label>
+      <input id="uid" type="text" inputmode="numeric" autocomplete="username" placeholder="1">
+      <label for="pwd">Code</label>
+      <input id="pwd" type="password" inputmode="numeric" autocomplete="current-password">
       <div style="height:12px"></div>
       <button class="primary" id="btn-login" style="width:100%">Entrer</button>
       <p id="login-err" class="small" style="color:var(--bad)"></p>
@@ -151,7 +153,7 @@
   async function api(path, opts = {}) {
     const headers = Object.assign({}, opts.headers || {}, state.token ? { Authorization: 'Bearer ' + state.token } : {});
     const res = await fetch(path, Object.assign({}, opts, { headers }));
-    if (res.status === 401 || res.status === 403) { state.token = ''; localStorage.removeItem('cash_owner_token'); showLogin(); throw new Error('Connexion requise'); }
+    if ((res.status === 401 || res.status === 403) && !path.startsWith('/cash/auth')) { state.token = ''; localStorage.removeItem('cash_owner_token'); showLogin(); throw new Error('Connexion requise'); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || ('Erreur ' + res.status));
     return data;
@@ -160,10 +162,10 @@
   $('#btn-login').onclick = async () => {
     $('#login-err').textContent = '';
     try {
-      const d = await api('/cash/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: $('#pwd').value }) });
-      if (d.role !== 'owner') { $('#login-err').textContent = 'Ce code est celui de la responsable : le tableau de bord est réservé au gérant.'; return; }
+      const d = await api('/cash/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: $('#uid').value, code: $('#pwd').value }) });
+      if (d.role !== 'owner') { $('#login-err').textContent = 'Ce compte est celui de la responsable : le tableau de bord est réservé au gérant.'; return; }
       state.token = d.token; localStorage.setItem('cash_owner_token', d.token); $('#pwd').value = ''; boot();
-    } catch (e) { $('#login-err').textContent = e.message === 'Code incorrect' ? 'Mot de passe incorrect.' : e.message; }
+    } catch (e) { $('#login-err').textContent = e.message.includes('incorrect') ? 'Identifiant ou code incorrect.' : e.message; }
   };
   $('#pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-login').click(); });
   $('#btn-logout').onclick = () => { state.token = ''; localStorage.removeItem('cash_owner_token'); showLogin(); };
@@ -190,7 +192,7 @@
     $('#integrations').innerHTML = [
       ['E-mail alertes', integ.email], ['Google Sheets', integ.sheets],
       ...Object.entries(integ.pennylane || {}).map(([k, v]) => ['Banque ' + (d.stores.find(s => s.id === k) || {}).label || k, v]),
-      ['Lecture IA', !integ.vision_mock],
+      ['Lecture des photos par ' + (integ.vision_provider === 'openai' ? 'OpenAI' : 'Claude'), !integ.vision_mock && integ.vision_key],
     ].map(([l, on]) => `<span class="${on ? 'on' : 'off'}">${on ? '●' : '○'} ${esc(l)}${on ? '' : ' (non configuré)'}</span>`).join('');
 
     // onglets magasins

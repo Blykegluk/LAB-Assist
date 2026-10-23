@@ -6,11 +6,13 @@ Suivi des dépôts d'espèces des magasins (Léon Blum / Ornano) : la responsabl
 
 | URL | Pour qui | Accès |
 |---|---|---|
-| `/depots/` | La responsable (PWA à installer sur l'écran d'accueil du téléphone) | code PIN `CASH_MANAGER_PIN` |
-| `/caisse/` | Le gérant (tableau de bord, alertes, réglages) | mot de passe `CASH_OWNER_PASSWORD` |
+| `/depots/` | La responsable (PWA à installer sur l'écran d'accueil du téléphone) | identifiant + code (compte `manager` dans `CASH_USERS`) |
+| `/caisse/` | Le gérant (tableau de bord, alertes, réglages) | identifiant + code (compte `owner` dans `CASH_USERS`) |
+
+Comptes par défaut : gérant `1` / `8626`, responsable `2` / `1234`. Pour un adjoint, ajouter `3:1234:manager:Adjoint` à `CASH_USERS`.
 
 ### Parcours de la responsable
-1. Entre son code (une seule fois, le téléphone s'en souvient 90 jours).
+1. Entre son identifiant et son code (une seule fois, le téléphone s'en souvient 90 jours).
 2. **Choisit obligatoirement le magasin** (gros bouton Léon Blum ou Ornano) avant d'accéder aux photos. Le magasin reste affiché en bandeau coloré sur tous les écrans suivants.
 3. Ajoute ses photos : relevé de caisse (storeMate « Paiements magasin » ou rapport opérateur Orika), bordereau « sac sécurisé billets », ticket de l'automate, éventuellement une facture payée en espèces. Photos ou PDF.
 4. Le site lit chaque document et affiche : journées couvertes, espèces encaissées, montant déposé, écart. Elle peut corriger un montant ou une date, ajouter une remarque, puis **Confirmer**.
@@ -48,6 +50,9 @@ Mise en place : créer un compte de service Google (Google Cloud → IAM → com
 
 ## Pennylane (rapprochement bancaire)
 Clé API par société dans `PENNYLANE_API_KEY_AEJB` / `PENNYLANE_API_KEY_JAB` (Pennylane → Paramètres → API). Chaque dépôt est recherché par numéro de sac dans le libellé bancaire, sinon par montant et date proche.
+
+## Lecture des photos
+Par défaut, les photos sont lues par Claude via le SDK Anthropic (modèle `claude-opus-5-5`, images et PDF envoyés tels quels). Il faut une **clé API** créée sur la console Anthropic (`ANTHROPIC_API_KEY`) : un abonnement claude.ai ne permet pas d'appeler l'API depuis un serveur. `CASH_VISION_PROVIDER=openai` rebascule sur le mécanisme OpenAI du module CNI.
 
 ## Configuration
 - `config.json` → bloc `cash` : magasins (libellé, entité, numéros de magasin de la caisse, couleur, sheet, société Pennylane) et règles par défaut.

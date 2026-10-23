@@ -20,8 +20,7 @@ def client(tmp_path_factory):
     os.environ["CASH_MOCK_EXTRACTION"] = "1"
     os.environ["CASH_SCHEDULER"] = "0"
     os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
-    os.environ["CASH_MANAGER_PIN"] = "2468"
-    os.environ["CASH_OWNER_PASSWORD"] = "owner-secret"
+    os.environ["CASH_USERS"] = "1:8626:owner:Anthony,2:2468:manager:Responsable"
     os.environ.pop("SMTP_HOST", None)
     os.environ.pop("GOOGLE_SERVICE_ACCOUNT_JSON", None)
     os.environ.pop("PENNYLANE_API_KEY", None)
@@ -39,7 +38,8 @@ def client(tmp_path_factory):
 
 
 def _login(client, code):
-    r = client.post("/cash/auth", json={"code": code})
+    uid = "1" if code == "owner-secret" else "2"
+    r = client.post("/cash/auth", json={"user_id": uid, "code": "8626" if code == "owner-secret" else code})
     assert r.status_code == 200, r.text
     return {"Authorization": "Bearer " + r.json()["token"]}
 
@@ -84,10 +84,12 @@ RELEVE_ORIKA = {
 
 
 def test_auth_roles(client):
-    assert client.post("/cash/auth", json={"code": "nope"}).status_code == 401
+    assert client.post("/cash/auth", json={"user_id": "2", "code": "nope"}).status_code == 401
+    assert client.post("/cash/auth", json={"user_id": "9", "code": "2468"}).status_code == 401
     m = _login(client, "2468")
     o = _login(client, "owner-secret")
-    assert client.get("/cash/me", headers=m).json()["role"] == "manager"
+    me = client.get("/cash/me", headers=m).json()
+    assert me["role"] == "manager" and me["user_id"] == "2" and me["label"] == "Responsable"
     assert client.get("/cash/me", headers=o).json()["role"] == "owner"
     assert client.get("/cash/dashboard", headers=m).status_code == 403
     assert client.get("/cash/stores").status_code == 401
@@ -242,3 +244,22 @@ def test_bank_matching():
     assert match_deposit({"bag_number": "0005179420", "amount": 1595, "deposit_date": "2026-10-21"}, txs)["id"] == "2"
     assert match_deposit({"bag_number": None, "amount": 2100, "deposit_date": "2026-10-19"}, txs)["id"] == "1"
     assert match_deposit({"bag_number": "0009999999", "amount": 999, "deposit_date": "2026-10-19"}, txs) is None
+
+
+def test_extractor_helpers():
+    from backend.cash_extract import _parse_json, CashDocExtractor
+    import os
+    assert _parse_json('```json\n{"type": "recu_gab", "deposit_amount": 1595}\n```')["deposit_amount"] == 1595
+    assert _parse_json('Voici : {"type": "bordereau"} fin')["type"] == "bordereau"
+    assert _parse_json("rien")["type"] == "autre"
+    os.environ.pop("CASH_VISION_PROVIDER", None); os.environ.pop("CASH_VISION_MODEL", None)
+    ex = CashDocExtractor()
+    assert ex.provider == "anthropic" and ex.model == "claude-opus-5-5"
+    blocks = ex._anthropic_blocks(b"%PDF-1.4 fake", "application/pdf")
+    assert blocks[0]["type"] == "document" and blocks[0]["source"]["media_type"] == "application/pdf"
+    import fitz
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 3000, 2000), False)
+    big = pix.tobytes("png")
+    blocks = ex._anthropic_blocks(big, "image/png")
+    assert blocks[0]["type"] == "image" and blocks[0]["source"]["media_type"] == "image/jpeg"
+    assert fitz.Pixmap(__import__("base64").b64decode(blocks[0]["source"]["data"])).width == 2000

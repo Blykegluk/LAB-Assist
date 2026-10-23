@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import cash_service as svc
-from .cash_auth import make_token, require_any, require_owner, role_for_code
+from .cash_auth import User, authenticate, make_token, require_any, require_owner
 from .cash_config import docs_dir, store_by_id, stores as config_stores
 from .cash_extract import get_extractor
 from .cash_models import CashAlert, CashDocument, CashSubmission
@@ -30,24 +30,25 @@ MAX_FILE_BYTES = 25 * 1024 * 1024
 
 
 class AuthIn(BaseModel):
+    user_id: str
     code: str
 
 
 @router.post("/auth")
 def auth(payload: AuthIn):
-    role = role_for_code(payload.code)
-    if not role:
-        raise HTTPException(status_code=401, detail="Code incorrect")
-    return {"role": role, "token": make_token(role)}
+    user = authenticate(payload.user_id, payload.code)
+    if not user:
+        raise HTTPException(status_code=401, detail="Identifiant ou code incorrect")
+    return {"role": user.role, "user_id": user.id, "label": user.label, "token": make_token(user)}
 
 
 @router.get("/me")
-def me(role: str = Depends(require_any)):
-    return {"role": role}
+def me(user: User = Depends(require_any)):
+    return {"role": user.role, "user_id": user.id, "label": user.label}
 
 
 @router.get("/stores")
-def list_stores(role: str = Depends(require_any)):
+def list_stores(user: User = Depends(require_any)):
     return {"stores": [{"id": s["id"], "label": s["label"], "entity": s["entity"], "color": s["color"], "pos_system": s["pos_system"]} for s in config_stores()]}
 
 
@@ -61,7 +62,7 @@ async def create_submission(
     store_id: str = Form(...),
     files: List[UploadFile] = File(...),
     note: Optional[str] = Form(None),
-    role: str = Depends(require_any),
+    user: User = Depends(require_any),
     db: Session = Depends(get_db),
 ):
     store = store_by_id(store_id)
@@ -72,7 +73,7 @@ async def create_submission(
     if len(files) > MAX_FILES:
         raise HTTPException(status_code=400, detail=f"{MAX_FILES} fichiers maximum par envoi")
 
-    sub = CashSubmission(store_id=store_id, status="pending", submitted_by=role, note=note)
+    sub = CashSubmission(store_id=store_id, status="pending", submitted_by=f"{user.label} ({user.id})", note=note)
     db.add(sub)
     db.commit()
     db.refresh(sub)
@@ -126,22 +127,22 @@ class ConfirmIn(BaseModel):
 
 
 @router.post("/submissions/{submission_id}/confirm")
-def confirm(submission_id: int, payload: ConfirmIn, role: str = Depends(require_any), db: Session = Depends(get_db)):
+def confirm(submission_id: int, payload: ConfirmIn, user: User = Depends(require_any), db: Session = Depends(get_db)):
     sub = db.get(CashSubmission, submission_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Envoi introuvable")
     try:
-        return svc.confirm_submission(db, sub, payload.model_dump(), role)
+        return svc.confirm_submission(db, sub, payload.model_dump(), user.role, f"{user.label} ({user.id})")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/submissions/{submission_id}/cancel")
-def cancel(submission_id: int, role: str = Depends(require_any), db: Session = Depends(get_db)):
+def cancel(submission_id: int, user: User = Depends(require_any), db: Session = Depends(get_db)):
     sub = db.get(CashSubmission, submission_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Envoi introuvable")
-    if sub.status == "confirmed" and role != "owner":
+    if sub.status == "confirmed" and user.role != "owner":
         raise HTTPException(status_code=403, detail="Un envoi confirmé ne peut être annulé que par le gérant")
     sub.status = "cancelled"
     db.commit()
@@ -150,7 +151,7 @@ def cancel(submission_id: int, role: str = Depends(require_any), db: Session = D
 
 @router.get("/submissions")
 def list_submissions(store_id: Optional[str] = None, month: Optional[str] = None, status: Optional[str] = None, limit: int = 100,
-                     role: str = Depends(require_owner), db: Session = Depends(get_db)):
+                     user: User = Depends(require_owner), db: Session = Depends(get_db)):
     q = select(CashSubmission)
     if store_id:
         q = q.where(CashSubmission.store_id == store_id)
@@ -164,7 +165,7 @@ def list_submissions(store_id: Optional[str] = None, month: Optional[str] = None
 
 
 @router.get("/submissions/{submission_id}")
-def get_submission(submission_id: int, role: str = Depends(require_any), db: Session = Depends(get_db)):
+def get_submission(submission_id: int, user: User = Depends(require_any), db: Session = Depends(get_db)):
     sub = db.get(CashSubmission, submission_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Envoi introuvable")
@@ -172,7 +173,7 @@ def get_submission(submission_id: int, role: str = Depends(require_any), db: Ses
 
 
 @router.get("/documents/{document_id}")
-def get_document(document_id: int, role: str = Depends(require_any), db: Session = Depends(get_db)):
+def get_document(document_id: int, user: User = Depends(require_any), db: Session = Depends(get_db)):
     doc = db.get(CashDocument, document_id)
     if not doc or not pathlib.Path(doc.path).exists():
         raise HTTPException(status_code=404, detail="Document introuvable")
@@ -180,7 +181,7 @@ def get_document(document_id: int, role: str = Depends(require_any), db: Session
 
 
 @router.get("/manager/recent")
-def manager_recent(store_id: str, role: str = Depends(require_any), db: Session = Depends(get_db)):
+def manager_recent(store_id: str, user: User = Depends(require_any), db: Session = Depends(get_db)):
     """Les derniers envois du magasin, pour que la responsable voie ce qui est déjà parti."""
     rows = db.execute(select(CashSubmission).where(CashSubmission.store_id == store_id, CashSubmission.status == "confirmed")
                       .order_by(CashSubmission.created_at.desc()).limit(5)).scalars().all()
@@ -192,7 +193,7 @@ def manager_recent(store_id: str, role: str = Depends(require_any), db: Session 
 
 
 @router.get("/dashboard")
-def get_dashboard(store_id: Optional[str] = None, month: Optional[str] = None, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def get_dashboard(store_id: Optional[str] = None, month: Optional[str] = None, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     month = month or date.today().strftime("%Y-%m")
     if not re.match(r"^\d{4}-\d{2}$", month):
         raise HTTPException(status_code=400, detail="month doit être au format AAAA-MM")
@@ -200,7 +201,7 @@ def get_dashboard(store_id: Optional[str] = None, month: Optional[str] = None, r
 
 
 @router.get("/alerts")
-def list_alerts(status: Optional[str] = "open", store_id: Optional[str] = None, limit: int = 200, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def list_alerts(status: Optional[str] = "open", store_id: Optional[str] = None, limit: int = 200, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     q = select(CashAlert)
     if status and status != "all":
         q = q.where(CashAlert.status == status)
@@ -211,7 +212,7 @@ def list_alerts(status: Optional[str] = "open", store_id: Optional[str] = None, 
 
 
 @router.post("/alerts/{alert_id}/ack")
-def ack_alert(alert_id: int, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def ack_alert(alert_id: int, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     a = db.get(CashAlert, alert_id)
     if not a:
         raise HTTPException(status_code=404, detail="Alerte introuvable")
@@ -222,7 +223,7 @@ def ack_alert(alert_id: int, role: str = Depends(require_owner), db: Session = D
 
 
 @router.post("/alerts/{alert_id}/reopen")
-def reopen_alert(alert_id: int, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def reopen_alert(alert_id: int, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     a = db.get(CashAlert, alert_id)
     if not a:
         raise HTTPException(status_code=404, detail="Alerte introuvable")
@@ -233,12 +234,12 @@ def reopen_alert(alert_id: int, role: str = Depends(require_owner), db: Session 
 
 
 @router.post("/checks/run")
-def run_checks(force_sheets: bool = False, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def run_checks(force_sheets: bool = False, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     return svc.run_checks(db, force_sheets=force_sheets)
 
 
 @router.post("/sheets/sync")
-def sheets_sync(store_id: Optional[str] = None, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def sheets_sync(store_id: Optional[str] = None, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     out = {}
     for s in config_stores():
         if store_id and s["id"] != store_id:
@@ -249,7 +250,7 @@ def sheets_sync(store_id: Optional[str] = None, role: str = Depends(require_owne
 
 
 @router.post("/digest/send")
-def digest_send(role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def digest_send(user: User = Depends(require_owner), db: Session = Depends(get_db)):
     return svc.send_digest(db, force=True)
 
 
@@ -265,12 +266,12 @@ class RulesIn(BaseModel):
 
 
 @router.get("/settings")
-def get_settings(role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def get_settings(user: User = Depends(require_owner), db: Session = Depends(get_db)):
     return {"rules": svc.effective_rules(db)}
 
 
 @router.put("/settings")
-def put_settings(payload: RulesIn, role: str = Depends(require_owner), db: Session = Depends(get_db)):
+def put_settings(payload: RulesIn, user: User = Depends(require_owner), db: Session = Depends(get_db)):
     current = svc.get_setting(db, "rules", {}) or {}
     current.update({k: v for k, v in payload.model_dump().items() if v is not None})
     svc.set_setting(db, "rules", current)
