@@ -15,8 +15,9 @@ Comptes par défaut : gérant `1` / `8626`, responsable `2` / `1234`. Pour un ad
 1. Entre son identifiant et son code (une seule fois, le téléphone s'en souvient 90 jours).
 2. **Choisit obligatoirement le magasin** (gros bouton Léon Blum ou Ornano) avant d'accéder aux photos. Le magasin reste affiché en bandeau coloré sur tous les écrans suivants.
 3. Ajoute ses photos : relevé de caisse (storeMate « Paiements magasin » ou rapport opérateur Orika), bordereau « sac sécurisé billets », ticket de l'automate, éventuellement une facture payée en espèces. Photos ou PDF.
-4. Le site lit chaque document et affiche : journées couvertes, espèces encaissées, montant déposé, écart. Elle peut corriger un montant ou une date, ajouter une remarque, puis **Confirmer**.
-5. Si un document appartient à l'autre magasin (numéro de magasin storeMate/Orika ou titulaire du compte AEJB/JAB sur le bordereau), la confirmation est **bloquée** avec un bouton « Mauvais magasin → changer ».
+4. Ajoute si besoin une remarque, puis **Envoyer**. C'est terminé pour elle : l'écran lui indique quand les documents seront analysés.
+
+En mode `immediate` (lecture par l'API), l'étape 4 est remplacée par un écran de vérification : journées couvertes, espèces encaissées, montant déposé, écart, correction possible, puis **Confirmer**. Un document de l'autre magasin y bloque la confirmation.
 
 Aucun rappel n'est envoyé à la responsable : les alertes vont uniquement au gérant.
 
@@ -52,7 +53,15 @@ Mise en place : créer un compte de service Google (Google Cloud → IAM → com
 Clé API par société dans `PENNYLANE_API_KEY_AEJB` / `PENNYLANE_API_KEY_JAB` (Pennylane → Paramètres → API). Chaque dépôt est recherché par numéro de sac dans le libellé bancaire, sinon par montant et date proche.
 
 ## Lecture des photos
-Par défaut, les photos sont lues par Claude via le SDK Anthropic (modèle `claude-opus-5-5`, images et PDF envoyés tels quels). Il faut une **clé API** créée sur la console Anthropic (`ANTHROPIC_API_KEY`) : un abonnement claude.ai ne permet pas d'appeler l'API depuis un serveur. `CASH_VISION_PROVIDER=openai` rebascule sur le mécanisme OpenAI du module CNI.
+**Mode `deferred` (par défaut), sur l'abonnement claude.ai du gérant.** Le site stocke les photos sans les lire. Deux fois par jour, une tâche Claude planifiée (« Analyse des dépôts d'espèces », 12h05 et 18h05 heure de Paris) :
+1. lit la file `GET /cash/worker/queue` et les consignes `GET /cash/worker/prompt` ;
+2. télécharge chaque photo (`GET /cash/worker/documents/{id}`) et la lit elle-même ;
+3. renvoie ses lectures (`POST /cash/worker/submissions/{id}/extractions`) : le site calcule l'écart, enregistre l'envoi et déclenche les alertes et e-mails ;
+4. lance les contrôles (`POST /cash/worker/checks`), ce qui réveille aussi le service Render.
+
+La tâche s'authentifie avec un jeton propre, dérivé de `CASH_SECRET` (ou `CASH_WORKER_TOKEN`), qui ne donne accès qu'à la file d'analyse. Un document d'un autre magasin ou une lecture incomplète n'empêchent pas l'enregistrement : ils créent une alerte pour le gérant, qui peut annuler l'envoi depuis le tableau de bord. Si des photos attendent plus de 14 heures, une alerte « Photos en attente d'analyse » signale que la tâche ne tourne plus.
+
+**Mode `immediate`.** Les photos sont lues à l'envoi par l'API Anthropic (`ANTHROPIC_API_KEY`, payante à l'usage, modèle `claude-opus-5-5`) ou OpenAI (`CASH_VISION_PROVIDER=openai`), et la responsable vérifie les montants avant de confirmer.
 
 ## Configuration
 - `config.json` → bloc `cash` : magasins (libellé, entité, numéros de magasin de la caisse, couleur, sheet, société Pennylane) et règles par défaut.
@@ -80,3 +89,5 @@ Les tests utilisent `CASH_MOCK_EXTRACTION=1` : des fichiers JSON remplacent les 
 
 ## API (préfixe `/cash`)
 `POST /auth` · `GET /stores` · `POST /submissions` (multipart `store_id` + `files[]`) · `POST /submissions/{id}/confirm` · `POST /submissions/{id}/cancel` · `GET /submissions` · `GET /submissions/{id}` · `GET /documents/{id}` · `GET /manager/recent` · `GET /dashboard?month=AAAA-MM&store_id=` · `GET /alerts` · `POST /alerts/{id}/ack|reopen` · `POST /checks/run` · `POST /sheets/sync` · `POST /digest/send` · `GET|PUT /settings`
+
+Tâche d'analyse (jeton de la tâche ou gérant) : `GET /worker/queue` · `GET /worker/prompt` · `GET /worker/documents/{id}` · `POST /worker/submissions/{id}/extractions` (`{"documents": [{"document_id": 1, "extraction": {…}}]}`) · `POST /worker/checks`

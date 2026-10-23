@@ -19,6 +19,7 @@ def client(tmp_path_factory):
     os.environ["DATABASE_URL"] = f"sqlite:///{tmp}/test.db"
     os.environ["CASH_MOCK_EXTRACTION"] = "1"
     os.environ["CASH_SCHEDULER"] = "0"
+    os.environ["CASH_ANALYSIS_MODE"] = "immediate"  # les tests du mode différé le changent localement
     os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
     os.environ["CASH_USERS"] = "1:8626:owner:Anthony,2:2468:manager:Responsable"
     os.environ.pop("SMTP_HOST", None)
@@ -263,3 +264,130 @@ def test_extractor_helpers():
     blocks = ex._anthropic_blocks(big, "image/png")
     assert blocks[0]["type"] == "image" and blocks[0]["source"]["media_type"] == "image/jpeg"
     assert fitz.Pixmap(__import__("base64").b64decode(blocks[0]["source"]["data"])).width == 2000
+
+
+# ----------------------------------------------------------------------------- analyse différée (tâche Claude planifiée)
+
+def _worker_headers():
+    from backend.cash_auth import worker_token
+
+    return {"Authorization": "Bearer " + worker_token()}
+
+
+def _deferred_upload(client, headers, store_id, names, note=None):
+    files = [("files", (n, f"fake-{n}".encode(), "image/jpeg")) for n in names]
+    data = {"store_id": store_id}
+    if note:
+        data["note"] = note
+    r = client.post("/cash/submissions", data=data, files=files, headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _queue_item(client, sid):
+    items = client.get("/cash/worker/queue", headers=_worker_headers()).json()["items"]
+    return next((i for i in items if i["submission_id"] == sid), None)
+
+
+def test_deferred_analysis_by_worker(client, monkeypatch):
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    m = _login(client, "2468")
+    o = _login(client, "owner-secret")
+    st = client.get("/cash/stores", headers=m).json()
+    assert st["analysis_mode"] == "deferred" and "vers" in st["next_analysis"]
+
+    body = _deferred_upload(client, m, "leon_blum", ["releve.jpg", "bordereau.jpg", "ticket.jpg"], note="dépôt du lundi")
+    assert body["status"] == "queued" and body["documents"] == 3
+    sid = body["submission_id"]
+    recent = client.get("/cash/manager/recent?store_id=leon_blum", headers=m).json()["items"]
+    assert recent[0]["id"] == sid and recent[0]["status"] == "queued" and recent[0]["documents"] == 3
+
+    # Accès : jeton de la tâche ou gérant, jamais la responsable
+    assert client.get("/cash/worker/queue").status_code == 401
+    assert client.get("/cash/worker/queue", headers=m).status_code == 401
+    assert client.get("/cash/worker/queue", headers=o).status_code == 200
+    w = _worker_headers()
+    item = _queue_item(client, sid)
+    assert item["store_label"] == "Léon Blum" and item["pos_store_numbers"] == ["4920"] and item["note"] == "dépôt du lundi"
+    assert "SAC SÉCURISÉ BILLETS" in client.get("/cash/worker/prompt", headers=w).text
+    assert client.get(item["documents"][0]["url"], headers=w).content == b"fake-releve.jpg"
+    assert client.get(item["documents"][0]["url"], headers=m).status_code == 401
+
+    ids = [d["id"] for d in item["documents"]]
+    extractions = [
+        dict(RELEVE_LB_1920, period_start="02/11/2026", period_end="03/11/2026", cash_amount=1500.0),
+        dict(BORDEREAU_LB_1595, deposit_date="04/11/2026", deposit_amount=1470, bag_number="0005179999"),
+        dict(RECU_LB_1595, deposit_date="04/11/2026", deposit_amount=1470.0, bag_number="0005179999"),
+    ]
+    payload = {"documents": [{"document_id": i, "extraction": e} for i, e in zip(ids, extractions)]}
+    r = client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w, json=payload)
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["ecart"] == 30.0 and res["deposit_amount"] == 1470.0 and any(t.startswith("Écart de dépôt") for t in res["alerts"])
+    assert client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w, json=payload).status_code == 400
+    assert _queue_item(client, sid) is None
+    sub = client.get(f"/cash/submissions/{sid}", headers=o).json()
+    assert sub["status"] == "confirmed" and sub["note"] == "dépôt du lundi" and sub["submitted_by"].startswith("Responsable")
+    assert {d["kind"] for d in sub["documents"]} == {"releve_storemate", "bordereau", "recu_gab"}
+    # Un document d'un autre envoi est refusé
+    other = _deferred_upload(client, m, "leon_blum", ["x.jpg"])
+    bad = {"documents": [{"document_id": ids[0], "extraction": extractions[0]}]}
+    assert client.post(f"/cash/worker/submissions/{other['submission_id']}/extractions", headers=w, json=bad).status_code == 400
+    client.post(f"/cash/submissions/{other['submission_id']}/cancel", headers=o)
+
+
+def test_deferred_wrong_store_and_incomplete(client, monkeypatch):
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    m = _login(client, "2468")
+    w = _worker_headers()
+    sid = _deferred_upload(client, m, "ornano", ["releve.jpg", "bordereau.jpg"])["submission_id"]
+    ids = [d["id"] for d in _queue_item(client, sid)["documents"]]
+    extractions = [
+        dict(RELEVE_LB_1920, period_start="09/11/2026", period_end="10/11/2026"),  # relevé Léon Blum (n° 4920)
+        {"type": "bordereau", "confidence": 0.3, "bag_number": "0005170000", "account_holder": "JAB"},  # montant illisible
+    ]
+    r = client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w,
+                    json={"documents": [{"document_id": i, "extraction": e} for i, e in zip(ids, extractions)]})
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert "Document d'un autre magasin" in res["alerts"] and "Analyse incomplète d'un envoi" in res["alerts"]
+    assert res["incomplete"] == ["un dépôt sans date ou sans montant lisible"]
+    o = _login(client, "owner-secret")
+    assert client.get(f"/cash/submissions/{sid}", headers=o).json()["status"] == "confirmed"
+
+
+def test_stale_queue_alert_and_dashboard(client, monkeypatch):
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    from datetime import datetime, timedelta
+    from backend.database import SessionLocal
+    from backend.cash_models import CashSubmission
+
+    m = _login(client, "2468")
+    o = _login(client, "owner-secret")
+    sid = _deferred_upload(client, m, "ornano", ["a.jpg"])["submission_id"]
+    db = SessionLocal()
+    try:
+        db.get(CashSubmission, sid).created_at = datetime.utcnow() - timedelta(hours=20)
+        db.commit()
+    finally:
+        db.close()
+    res = client.post("/cash/worker/checks", headers=_worker_headers())
+    assert res.status_code == 200, res.text
+    alerts = client.get("/cash/alerts", headers=o).json()["items"]
+    assert any(a["kind"] == "stale_queue" and a["submission_id"] == sid for a in alerts)
+    d = client.get("/cash/dashboard?month=" + datetime.utcnow().strftime("%Y-%m"), headers=o).json()
+    orn = next(s for s in d["stores"] if s["id"] == "ornano")
+    assert orn["kpis"]["queued"] >= 1 and any(q["id"] == sid for q in orn["queued"])
+    assert d["integrations"]["analysis_mode"] == "deferred" and d["integrations"]["last_worker_run_at"]
+
+
+def test_next_analysis_label(monkeypatch):
+    from datetime import datetime
+    from backend.cash_service import next_analysis_label
+
+    monkeypatch.delenv("CASH_ANALYSIS_TIMES", raising=False)
+    assert next_analysis_label(datetime(2026, 10, 23, 9, 0)) == "aujourd'hui vers 12h05"
+    assert next_analysis_label(datetime(2026, 10, 23, 15, 0)) == "aujourd'hui vers 18h05"
+    assert next_analysis_label(datetime(2026, 10, 23, 19, 0)) == "demain vers 12h05"
+    monkeypatch.setenv("CASH_ANALYSIS_TIMES", "12:30,18:30")
+    assert next_analysis_label(datetime(2026, 10, 23, 12, 45)) == "aujourd'hui vers 18h30"

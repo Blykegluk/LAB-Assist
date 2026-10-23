@@ -10,13 +10,14 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import cash_service as svc
-from .cash_auth import User, authenticate, make_token, require_any, require_owner
+from .cash_auth import User, authenticate, make_token, require_any, require_owner, require_worker
+from .cash_extract import PROMPT_PATH
 from .cash_config import docs_dir, store_by_id, stores as config_stores
 from .cash_extract import get_extractor
 from .cash_models import CashAlert, CashDocument, CashSubmission
@@ -49,7 +50,11 @@ def me(user: User = Depends(require_any)):
 
 @router.get("/stores")
 def list_stores(user: User = Depends(require_any)):
-    return {"stores": [{"id": s["id"], "label": s["label"], "entity": s["entity"], "color": s["color"], "pos_system": s["pos_system"]} for s in config_stores()]}
+    return {
+        "stores": [{"id": s["id"], "label": s["label"], "entity": s["entity"], "color": s["color"], "pos_system": s["pos_system"]} for s in config_stores()],
+        "analysis_mode": svc.analysis_mode(),
+        "next_analysis": svc.next_analysis_label(),
+    }
 
 
 def _storage():
@@ -84,14 +89,15 @@ async def create_submission(
     if len(files) > MAX_FILES:
         raise HTTPException(status_code=400, detail=f"{MAX_FILES} fichiers maximum par envoi")
 
-    sub = CashSubmission(store_id=store_id, status="pending", submitted_by=f"{user.label} ({user.id})", note=note)
+    deferred = svc.analysis_mode() == "deferred"
+    sub = CashSubmission(store_id=store_id, status="queued" if deferred else "pending", submitted_by=f"{user.label} ({user.id})", note=note)
     db.add(sub)
     db.commit()
     db.refresh(sub)
 
     folder = docs_dir() / store_id / f"{date.today():%Y-%m}" / str(sub.id)
     folder.mkdir(parents=True, exist_ok=True)
-    extractor = get_extractor()
+    extractor = None if deferred else get_extractor()
     storage = _storage()
     extracted_pairs: list[tuple[int, dict]] = []
     for uf in files:
@@ -112,6 +118,13 @@ async def create_submission(
             except Exception as e:
                 log.warning("copie Supabase Storage échouée pour %s : %s", fname, e)
                 remote_path = None
+        if deferred:
+            doc = CashDocument(submission_id=sub.id, store_id=store_id, kind="en_attente", filename=uf.filename or fname,
+                               path=str(path), remote_path=remote_path, mime=mime)
+            db.add(doc)
+            db.flush()
+            extracted_pairs.append((doc.id, {}))
+            continue
         try:
             extracted = extractor.extract(content, mime, uf.filename or "")
         except Exception as e:
@@ -129,6 +142,10 @@ async def create_submission(
         db.delete(sub)
         db.commit()
         raise HTTPException(status_code=400, detail="Fichiers vides")
+
+    if deferred:
+        db.commit()
+        return {"submission_id": sub.id, "status": "queued", "documents": len(extracted_pairs), "next_analysis": svc.next_analysis_label()}
 
     analysis = svc.analyze_documents(db, store, extracted_pairs)
     sub.analysis_json = json.dumps(analysis, ensure_ascii=False)
@@ -195,6 +212,10 @@ def get_submission(submission_id: int, user: User = Depends(require_any), db: Se
 
 @router.get("/documents/{document_id}")
 def get_document(document_id: int, user: User = Depends(require_any), db: Session = Depends(get_db)):
+    return _serve_document(db, document_id)
+
+
+def _serve_document(db: Session, document_id: int):
     doc = db.get(CashDocument, document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document introuvable")
@@ -213,13 +234,68 @@ def get_document(document_id: int, user: User = Depends(require_any), db: Sessio
 @router.get("/manager/recent")
 def manager_recent(store_id: str, user: User = Depends(require_any), db: Session = Depends(get_db)):
     """Les derniers envois du magasin, pour que la responsable voie ce qui est déjà parti."""
-    rows = db.execute(select(CashSubmission).where(CashSubmission.store_id == store_id, CashSubmission.status == "confirmed")
+    rows = db.execute(select(CashSubmission).where(CashSubmission.store_id == store_id, CashSubmission.status.in_(("confirmed", "queued")))
                       .order_by(CashSubmission.created_at.desc()).limit(5)).scalars().all()
     items = []
     for s in rows:
         d = svc.submission_to_dict(db, s, with_docs=False)
-        items.append({"id": d["id"], "period": d["period"], "deposit_amount": d["deposit_amount"], "expected_amount": d["expected_amount"], "confirmed_at": d["confirmed_at"]})
+        n_docs = len(db.execute(select(CashDocument).where(CashDocument.submission_id == s.id)).scalars().all())
+        items.append({"id": d["id"], "status": d["status"], "period": d["period"], "deposit_amount": d["deposit_amount"],
+                      "expected_amount": d["expected_amount"], "confirmed_at": d["confirmed_at"], "created_at": d["created_at"], "documents": n_docs})
     return {"items": items}
+
+
+# ----------------------------------------------------------------------------- tâche d'analyse planifiée
+
+@router.get("/worker/queue")
+def worker_queue(who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    """Envois en attente d'analyse, avec les liens vers leurs photos."""
+    return {"items": svc.queue_items(db), "prompt_url": "/cash/worker/prompt",
+            "result_url": "/cash/worker/submissions/{submission_id}/extractions"}
+
+
+@router.get("/worker/prompt", response_class=PlainTextResponse)
+def worker_prompt(who: str = Depends(require_worker)):
+    """Consignes de lecture des documents (même prompt que l'analyse immédiate)."""
+    return PROMPT_PATH.read_text(encoding="utf-8")
+
+
+@router.get("/worker/documents/{document_id}")
+def worker_document(document_id: int, who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    return _serve_document(db, document_id)
+
+
+class WorkerDocIn(BaseModel):
+    document_id: int
+    extraction: dict
+
+
+class WorkerResultIn(BaseModel):
+    documents: list[WorkerDocIn]
+
+
+@router.post("/worker/submissions/{submission_id}/extractions")
+def worker_result(submission_id: int, payload: WorkerResultIn, who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    sub = db.get(CashSubmission, submission_id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Envoi introuvable")
+    try:
+        out = svc.apply_worker_extractions(db, sub, [d.model_dump() for d in payload.documents])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    svc.set_setting(db, "last_worker_run_at", datetime.utcnow().isoformat())
+    s = out["submission"]
+    return {"submission_id": s["id"], "store": s["store_label"], "period": s["period"], "expected_amount": s["expected_amount"],
+            "deposit_amount": s["deposit_amount"], "ecart": s["ecart"], "alerts": [a["title"] for a in out["alerts"]],
+            "incomplete": out.get("incomplete") or []}
+
+
+@router.post("/worker/checks")
+def worker_checks(who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    """Lance les contrôles et le récap e-mail (utile si le serveur a dormi)."""
+    svc.set_setting(db, "last_worker_run_at", datetime.utcnow().isoformat())
+    res = svc.run_checks(db)
+    return {"ran_at": res["ran_at"], "notified_critical": res.get("notified_critical"), "digest": res.get("digest")}
 
 
 @router.get("/dashboard")

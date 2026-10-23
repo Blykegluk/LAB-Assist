@@ -126,8 +126,12 @@
     </div>
     <div class="thumbs" id="thumbs"></div>
   </div>
+  <div class="card" id="u-note-card">
+    <label for="u-note">Remarque (facultatif)</label>
+    <textarea id="u-note" rows="2" placeholder="Ex : il manquait 20 € dans la caisse 2"></textarea>
+  </div>
   <div class="sticky">
-    <button id="btn-analyze" disabled>Analyser les documents</button>
+    <button id="btn-analyze" disabled>Envoyer les documents</button>
   </div>
   <div class="card recent" id="recent-card">
     <b>Derniers envois pour ce magasin</b>
@@ -140,8 +144,8 @@
   <div class="banner"><div><div class="sub">Magasin sélectionné</div><div class="name" id="w-store-name">—</div></div></div>
   <div class="card center">
     <div class="spinner"></div>
-    <h2 style="margin:0">Analyse en cours…</h2>
-    <p class="muted">Lecture des montants et des dates. Cela prend quelques secondes.</p>
+    <h2 style="margin:0" id="w-title">Envoi en cours…</h2>
+    <p class="muted" id="w-text">Les photos partent sur le serveur. Garde l'application ouverte quelques secondes.</p>
   </div>
 </section>
 
@@ -178,7 +182,7 @@
 <section id="s-done" class="screen">
   <div class="center">
     <div class="big-check">✓</div>
-    <h1>C'est enregistré</h1>
+    <h1 id="done-title">C'est enregistré</h1>
     <p class="muted" id="done-text"></p>
   </div>
   <div class="card" id="done-summary"></div>
@@ -228,6 +232,8 @@
   async function loadStores() {
     const d = await api('/cash/stores');
     state.stores = d.stores;
+    state.mode = d.analysis_mode || 'immediate';
+    $('#u-note-card').classList.toggle('hidden', state.mode !== 'deferred');
     const list = $('#store-list'); list.innerHTML = '';
     for (const s of d.stores) {
       const b = document.createElement('button');
@@ -251,7 +257,12 @@
       ul.innerHTML = d.items.length ? '' : '<li class="muted">Aucun envoi pour l\'instant.</li>';
       for (const it of d.items) {
         const li = document.createElement('li');
-        li.innerHTML = `<span>${it.period || '—'}</span><span class="amount">${it.deposit_amount != null ? EUR(it.deposit_amount) : 'sans dépôt'}</span>`;
+        if (it.status === 'queued') {
+          const when = it.created_at ? new Date(it.created_at + (it.created_at.endsWith('Z') ? '' : 'Z')).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+          li.innerHTML = `<span>Envoyé le ${when} · ${it.documents} photo${it.documents > 1 ? 's' : ''}</span><span class="muted">en attente d'analyse</span>`;
+        } else {
+          li.innerHTML = `<span>${it.period || '—'}</span><span class="amount">${it.deposit_amount != null ? EUR(it.deposit_amount) : 'sans dépôt'}</span>`;
+        }
         ul.appendChild(li);
       }
     } catch (e) { ul.innerHTML = '<li class="muted">Historique indisponible.</li>'; }
@@ -276,19 +287,47 @@
       d.appendChild(rm); box.appendChild(d);
     });
     $('#btn-analyze').disabled = state.files.length === 0;
-    $('#btn-analyze').textContent = state.files.length ? `Analyser ${state.files.length} document${state.files.length > 1 ? 's' : ''}` : 'Analyser les documents';
+    $('#btn-analyze').textContent = state.files.length ? `Envoyer ${state.files.length} document${state.files.length > 1 ? 's' : ''}` : 'Envoyer les documents';
   }
 
-  // ---------- analyse
+  // Réduit les photos du téléphone (souvent 4000 px, plusieurs Mo) avant l'envoi : plus rapide sur réseau mobile.
+  async function shrink(f) {
+    if (!f.type || !f.type.startsWith('image/') || f.type === 'image/gif') return f;
+    try {
+      const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' });
+      const sc = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+      if (sc === 1 && f.size < 2.5e6) return f;
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+      if (!blob) return f;
+      return new File([blob], (f.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    } catch (e) { return f; }
+  }
+
+  // ---------- envoi
   $('#btn-analyze').onclick = async () => {
     if (!state.store || !state.files.length) return;
+    const deferred = state.mode === 'deferred';
+    $('#w-title').textContent = deferred ? 'Envoi en cours…' : 'Analyse en cours…';
+    $('#w-text').textContent = deferred ? "Les photos partent sur le serveur. Garde l'application ouverte quelques secondes." : 'Lecture des montants et des dates. Cela prend quelques secondes.';
     show('wait');
     const fd = new FormData();
     fd.append('store_id', state.store.id);
-    for (const f of state.files) fd.append('files', f, f.name || 'photo.jpg');
+    if (deferred && $('#u-note').value.trim()) fd.append('note', $('#u-note').value.trim());
+    for (const f of state.files) { const g = await shrink(f); fd.append('files', g, g.name || 'photo.jpg'); }
     try {
       const d = await api('/cash/submissions', { method: 'POST', body: fd });
-      state.submissionId = d.submission_id; state.analysis = d.analysis;
+      state.submissionId = d.submission_id;
+      if (d.status === 'queued') {
+        $('#done-title').textContent = "C'est envoyé";
+        $('#done-text').textContent = `${state.store.label} · ${d.documents} document${d.documents > 1 ? 's' : ''}`;
+        $('#done-summary').innerHTML = `<p style="margin:0">Les montants seront lus et vérifiés automatiquement <b>${d.next_analysis}</b>. Tu n'as rien d'autre à faire.</p>`;
+        state.files = []; renderThumbs(); $('#u-note').value = ''; show('done');
+        return;
+      }
+      state.analysis = d.analysis;
       renderReview(); show('review');
     } catch (e) {
       toast('Envoi impossible : ' + e.message + '. Tes photos sont conservées, réessaie.', 6000);
@@ -379,6 +418,7 @@
       const d = await api(`/cash/submissions/${state.submissionId}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reports: a.reports, deposits: a.deposits, expenses: a.expenses, note: $('#note').value || null }) });
       const s = d.submission;
+      $('#done-title').textContent = "C'est enregistré";
       $('#done-text').textContent = `${state.store.label} · ${s.period || ''}`;
       $('#done-summary').innerHTML = `
         <div class="kv"><span class="k">Espèces encaissées</span><span class="v">${EUR(s.expected_amount)}</span></div>

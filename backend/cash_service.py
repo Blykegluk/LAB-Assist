@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import re
 import unicodedata
 from datetime import date, datetime, timedelta
@@ -660,7 +661,8 @@ def confirm_submission(db: Session, sub: CashSubmission, payload: dict, role: st
             a, _ = upsert_alert(db, sub.store_id, "low_confidence", "info", "Lecture incertaine d'un document", f"{label}, {period} : {i['message']}", f"lowconf:{sub.id}:{i.get('document_id')}", submission_id=sub.id)
             created_alerts.append(a)
         elif i.get("code") == "wrong_store" and blocking:
-            a, _ = upsert_alert(db, sub.store_id, "wrong_store", "critical", "Document d'un autre magasin confirmé de force", f"{label} : {i['message']}", f"wrongstore:{sub.id}", submission_id=sub.id)
+            a, _ = upsert_alert(db, sub.store_id, "wrong_store", "critical", "Document d'un autre magasin",
+                                f"{label} : {i['message']} Vérifie l'envoi et annule-le s'il est mal classé.", f"wrongstore:{sub.id}", submission_id=sub.id)
             created_alerts.append(a)
     # Les jours désormais couverts ne sont plus "non traités"
     for d in analysis.get("coverage", {}).get("days") or []:
@@ -673,6 +675,148 @@ def confirm_submission(db: Session, sub: CashSubmission, payload: dict, role: st
     db.commit()
     notify_critical(db, created_alerts)
     return {"submission": submission_to_dict(db, sub), "alerts": [alert_to_dict(a) for a in created_alerts]}
+
+
+# ----------------------------------------------------------------------------- analyse différée (tâche Claude planifiée)
+
+def analysis_mode() -> str:
+    """deferred (défaut) : photos stockées puis analysées par une tâche Claude planifiée.
+    immediate : photos lues à l'envoi via l'API (clé ANTHROPIC_API_KEY ou OPENAI_API_KEY)."""
+    mode = (os.getenv("CASH_ANALYSIS_MODE") or "deferred").strip().lower()
+    return mode if mode in ("deferred", "immediate") else "deferred"
+
+
+def analysis_times() -> list[tuple[int, int]]:
+    out = []
+    for part in (os.getenv("CASH_ANALYSIS_TIMES") or "12:05,18:05").split(","):
+        m = re.match(r"^\s*(\d{1,2})[:hH](\d{2})\s*$", part)
+        if m:
+            out.append((int(m.group(1)), int(m.group(2))))
+    return sorted(out) or [(12, 5), (18, 5)]
+
+
+def next_analysis_label(now: Optional[datetime] = None) -> str:
+    """Texte affiché à la responsable : quand ses documents seront analysés (heure de Paris)."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        now = now or datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        now = now or datetime.now()
+    for h, m in analysis_times():
+        if (now.hour, now.minute) < (h, m):
+            return f"aujourd'hui vers {h}h{m:02d}"
+    h, m = analysis_times()[0]
+    return f"demain vers {h}h{m:02d}"
+
+
+def queue_items(db: Session) -> list[dict]:
+    subs = db.execute(select(CashSubmission).where(CashSubmission.status == "queued").order_by(CashSubmission.created_at)).scalars().all()
+    items = []
+    for sub in subs:
+        store = store_by_id(sub.store_id) or {}
+        docs = db.execute(select(CashDocument).where(CashDocument.submission_id == sub.id).order_by(CashDocument.id)).scalars().all()
+        items.append({
+            "submission_id": sub.id,
+            "store_id": sub.store_id,
+            "store_label": store.get("label"),
+            "entity": store.get("entity"),
+            "pos_system": store.get("pos_system"),
+            "pos_store_numbers": store.get("pos_store_numbers"),
+            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+            "submitted_by": sub.submitted_by,
+            "note": sub.note,
+            "documents": [{"id": d.id, "filename": d.filename, "mime": d.mime, "url": f"/cash/worker/documents/{d.id}"} for d in docs],
+        })
+    return items
+
+
+def _incomplete(analysis: dict) -> list[str]:
+    """Retire les éléments que l'analyse n'a pas pu lire en entier, pour que l'envoi soit quand même enregistré."""
+    problems = []
+    keep = []
+    for rep in analysis.get("reports") or []:
+        if parse_date_any(rep.get("period_start")) and to_float(rep.get("cash_amount")) is not None:
+            keep.append(rep)
+        else:
+            problems.append("un relevé de caisse sans période ou sans montant espèces lisible")
+    analysis["reports"] = keep
+    keep = []
+    for dep in analysis.get("deposits") or []:
+        if parse_date_any(dep.get("deposit_date")) and to_float(dep.get("amount")) is not None:
+            keep.append(dep)
+        else:
+            problems.append("un dépôt sans date ou sans montant lisible")
+    analysis["deposits"] = keep
+    keep = []
+    for e in analysis.get("expenses") or []:
+        if to_float(e.get("amount")) is not None:
+            keep.append(e)
+        else:
+            problems.append("une facture sans montant lisible")
+    analysis["expenses"] = keep
+    return problems
+
+
+def apply_worker_extractions(db: Session, sub: CashSubmission, items: list[dict], who: str = "Analyse Claude") -> dict:
+    """Enregistre les lectures faites par la tâche planifiée, puis confirme l'envoi (calcul, alertes, e-mails)."""
+    if sub.status != "queued":
+        raise ValueError(f"Envoi n°{sub.id} déjà traité (statut {sub.status})")
+    store = store_by_id(sub.store_id)
+    if not store:
+        raise ValueError("Magasin inconnu")
+    docs = {d.id: d for d in db.execute(select(CashDocument).where(CashDocument.submission_id == sub.id)).scalars().all()}
+    pairs: list[tuple[int, dict]] = []
+    seen: set[int] = set()
+    for it in items or []:
+        try:
+            did = int(it.get("document_id"))
+        except (TypeError, ValueError):
+            raise ValueError("document_id manquant ou invalide")
+        if did not in docs:
+            raise ValueError(f"Le document {did} n'appartient pas à l'envoi n°{sub.id}")
+        ex = it.get("extraction") if isinstance(it.get("extraction"), dict) else {"type": "autre", "confidence": 0, "warnings": ["extraction absente"]}
+        d = docs[did]
+        d.kind = str(ex.get("type") or "autre")
+        d.confidence = to_float(ex.get("confidence"))
+        d.extracted_json = json.dumps(ex, ensure_ascii=False)
+        pairs.append((did, ex))
+        seen.add(did)
+    for did in sorted(set(docs) - seen):
+        ex = {"type": "autre", "confidence": 0, "warnings": ["document non analysé par la tâche planifiée"]}
+        docs[did].extracted_json = json.dumps(ex, ensure_ascii=False)
+        pairs.append((did, ex))
+    analysis = analyze_documents(db, store, pairs)
+    problems = _incomplete(analysis)
+    compute_totals(analysis)
+    sub.analysis_json = json.dumps(analysis, ensure_ascii=False)
+    db.flush()
+    result = confirm_submission(db, sub, {"force": True}, "owner", who=sub.submitted_by or who)
+    resolve_alert(db, f"stale_queue:{sub.id}")
+    if problems:
+        a, _ = upsert_alert(db, sub.store_id, "analysis_incomplete", "warning", "Analyse incomplète d'un envoi",
+                            f"{store['label']}, envoi n°{sub.id} : {', '.join(sorted(set(problems)))}. Ouvre l'envoi pour vérifier les photos.",
+                            f"incomplete:{sub.id}", submission_id=sub.id)
+        result["alerts"].append(alert_to_dict(a))
+    db.commit()
+    result["incomplete"] = problems
+    return result
+
+
+def check_stale_queue(db: Session, store_id: str, max_hours: float = 14.0) -> dict:
+    """Alerte si des photos attendent l'analyse trop longtemps (tâche planifiée arrêtée ou en échec)."""
+    limit = datetime.utcnow() - timedelta(hours=max_hours)
+    subs = db.execute(select(CashSubmission).where(CashSubmission.store_id == store_id, CashSubmission.status == "queued")).scalars().all()
+    stale = 0
+    for sub in subs:
+        if sub.created_at and sub.created_at < limit:
+            stale += 1
+            upsert_alert(db, store_id, "stale_queue", "warning", "Photos en attente d'analyse",
+                         f"{_store_label(store_id)} : l'envoi n°{sub.id} du {fr(sub.created_at.date())} n'a pas encore été analysé. "
+                         "Vérifie que la tâche planifiée « Analyse des dépôts d'espèces » tourne bien.",
+                         f"stale_queue:{sub.id}", submission_id=sub.id, ref_date=sub.created_at.date())
+    db.commit()
+    return {"queued": len(subs), "stale": stale}
 
 
 def _period_label(analysis: dict) -> str:
@@ -902,6 +1046,7 @@ def run_checks(db: Session, force_sheets: bool = False) -> dict:
             "sheet": sync_sheet(db, store, force=force_sheets, r=r),
         }
         res["sheet_consistency"] = check_sheet_consistency(db, store, r)
+        res["queue"] = check_stale_queue(db, sid)
         out["stores"][sid] = res
         after = db.execute(select(CashAlert).where(CashAlert.store_id == sid, CashAlert.status == "open")).scalars().all()
         new_critical.extend(a for a in after if a.id not in before and a.severity == "critical")
@@ -937,6 +1082,7 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
         deposits = db.execute(select(CashDeposit).where(CashDeposit.store_id == sid)).scalars().all()
         expenses = db.execute(select(CashExpense).where(CashExpense.store_id == sid)).scalars().all()
         alerts = db.execute(select(CashAlert).where(CashAlert.store_id == sid, CashAlert.status != "resolved").order_by(CashAlert.created_at.desc())).scalars().all()
+        queued = db.execute(select(CashSubmission).where(CashSubmission.store_id == sid, CashSubmission.status == "queued").order_by(CashSubmission.created_at)).scalars().all()
 
         # Couverture des journées
         covered: dict[date, list[int]] = {}
@@ -1022,7 +1168,11 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                 "bank_matched": len([d for d in m_deposits if d.bank_status == "matched"]),
                 "bank_missing": len([d for d in m_deposits if d.bank_status == "missing"]),
                 "bank_unchecked": len([d for d in m_deposits if d.bank_status in ("pending", "unchecked")]),
+                "queued": len(queued),
             },
+            "queued": [{"id": q.id, "created_at": q.created_at.isoformat() if q.created_at else None, "submitted_by": q.submitted_by, "note": q.note,
+                        "documents_count": len(db.execute(select(CashDocument).where(CashDocument.submission_id == q.id)).scalars().all())}
+                       for q in queued],
             "last_covered": iso(max(covered)) if covered else None,
             "last_submission_at": subs[0].created_at.isoformat() if subs else None,
             "calendar": calendar,
@@ -1041,8 +1191,11 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
         "email": cash_notify.configured(),
         "sheets": SheetsClient.configured(),
         "pennylane": {s["id"]: cash_bank.configured(s.get("entity")) for s in config_stores()},
-        "vision_mock": __import__("os").getenv("CASH_MOCK_EXTRACTION", "") in ("1", "true", "yes"),
-        "vision_provider": (__import__("os").getenv("CASH_VISION_PROVIDER") or "anthropic").lower(),
-        "vision_key": bool(__import__("os").getenv("ANTHROPIC_API_KEY") or __import__("os").getenv("ANTHROPIC_AUTH_TOKEN")) if (__import__("os").getenv("CASH_VISION_PROVIDER") or "anthropic").lower() == "anthropic" else bool(__import__("os").getenv("OPENAI_API_KEY")),
+        "vision_mock": os.getenv("CASH_MOCK_EXTRACTION", "") in ("1", "true", "yes"),
+        "vision_provider": (os.getenv("CASH_VISION_PROVIDER") or "anthropic").lower(),
+        "vision_key": bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")) if (os.getenv("CASH_VISION_PROVIDER") or "anthropic").lower() == "anthropic" else bool(os.getenv("OPENAI_API_KEY")),
+        "analysis_mode": analysis_mode(),
+        "analysis_times": [f"{h}h{m:02d}" for h, m in analysis_times()],
+        "last_worker_run_at": get_setting(db, "last_worker_run_at"),
     }
     return out
