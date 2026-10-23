@@ -191,7 +191,7 @@
     const integ = d.integrations || {};
     $('#integrations').innerHTML = [
       ['E-mail alertes', integ.email], ['Google Sheets', integ.sheets],
-      ...Object.entries(integ.pennylane || {}).map(([k, v]) => ['Banque ' + (d.stores.find(s => s.id === k) || {}).label || k, v]),
+      ...Object.entries(integ.pennylane || {}).map(([k, v]) => ['Banque ' + ((integ.store_labels || {})[k] || k), v]),
       integ.analysis_mode === 'deferred'
         ? ['Analyse Claude ' + (integ.analysis_times || []).join(' et ') + (integ.last_worker_run_at ? ' · dernier passage ' + FRDT(integ.last_worker_run_at) : ' · aucun passage encore'), !!integ.last_worker_run_at, true]
         : ['Lecture des photos par ' + (integ.vision_provider === 'openai' ? 'OpenAI' : 'Claude'), !integ.vision_mock && integ.vision_key],
@@ -256,7 +256,9 @@
       <span class="meta">${esc(s.entity || '')} · caisse ${esc(s.pos_system)} · dernier relevé : ${s.last_covered ? 'jusqu\'au ' + FRD(s.last_covered) : 'aucun'}</span></div>
     <div class="kpis">
       <div class="kpi"><div class="l">Espèces encaissées</div><div class="v">${EUR(k.cash_collected)}</div><div class="s">${k.submissions} envoi(s) ce mois</div></div>
-      <div class="kpi"><div class="l">Déposé en banque</div><div class="v">${EUR(k.deposited)}</div><div class="s">${k.deposits_count} dépôt(s)${k.expenses ? ' · factures espèces ' + EUR(k.expenses) : ''}</div></div>
+      ${k.bank_cash_count
+        ? `<div class="kpi"><div class="l">Déposé en banque</div><div class="v">${EUR(k.bank_cash_total)}</div><div class="s">${k.bank_cash_count} dépôt(s) au relevé · ${k.deposits_count} justifié(s) sur le site</div></div>`
+        : `<div class="kpi"><div class="l">Déposé en banque</div><div class="v">${EUR(k.deposited)}</div><div class="s">${k.deposits_count} dépôt(s)${k.expenses ? ' · factures espèces ' + EUR(k.expenses) : ''}</div></div>`}
       <div class="kpi ${ecartCls}"><div class="l">Écart cumulé</div><div class="v">${k.ecart_total == null ? '—' : (k.ecart_total > 0 ? '−' : k.ecart_total < 0 ? '+' : '') + EUR(Math.abs(k.ecart_total))}</div><div class="s">${k.ecart_total > 0 ? 'moins déposé qu\'encaissé' : k.ecart_total < 0 ? 'plus déposé qu\'encaissé' : 'à l\'équilibre'}</div></div>
       <div class="kpi ${k.critical_alerts ? 'bad' : k.open_alerts ? 'warn' : 'ok'}"><div class="l">Alertes ouvertes</div><div class="v">${k.open_alerts}</div><div class="s">${k.critical_alerts} critique(s)</div></div>
       <div class="kpi ${k.missing_days ? 'warn' : 'ok'}"><div class="l">Jours non traités</div><div class="v">${k.missing_days}</div><div class="s">ce mois, hors délai</div></div>
@@ -277,9 +279,16 @@
       </div>
       <div class="card">
         <h2>Dépôts et banque</h2>
+        <div class="small muted" style="margin:-4px 0 6px">Envoyés sur le site</div>
         ${s.deposits.length ? `<table><thead><tr><th>Date</th><th>Sac</th><th class="num">Bordereau</th><th class="num">Automate</th><th class="num">Retenu</th><th>Banque</th></tr></thead><tbody>
           ${s.deposits.map(x => { const [bl, bc] = BANK[x.bank_status] || BANK.unchecked; return `<tr class="clickable" data-sub="${x.submission_id}"><td>${FRD(x.deposit_date)}</td><td class="small">${esc(x.bag_number || '—')}</td><td class="num">${EUR(x.slip_amount)}</td><td class="num">${EUR(x.receipt_amount)}</td><td class="num"><b>${EUR(x.amount)}</b></td><td><span class="pill ${bc}">${bl}</span>${x.bank_date ? `<div class="small muted">${FRD(x.bank_date)}</div>` : ''}</td></tr>`; }).join('')}
-        </tbody></table>` : '<p class="muted">Aucun dépôt ce mois.</p>'}
+        </tbody></table>` : '<p class="muted" style="margin-top:0">Aucun bordereau envoyé ce mois.</p>'}
+        <div class="small muted" style="margin:14px 0 6px">Relevé bancaire Pennylane${s.bank_import_at ? ' · mis à jour le ' + FRDT(s.bank_import_at) : ''}</div>
+        ${(s.bank_deposits || []).length ? `<table><thead><tr><th>Date</th><th>Sac</th><th class="num">Montant</th><th>Justificatif</th></tr></thead><tbody>
+          ${s.bank_deposits.map(b => `<tr ${b.submission_id ? `class="clickable" data-sub="${b.submission_id}"` : ''}><td>${FRD(b.date)}</td><td class="small">${esc(b.bag_number || '—')}</td><td class="num"><b>${EUR(b.amount)}</b></td><td>${b.submission_id
+            ? `<span class="pill ok">envoi n°${b.submission_id}</span>`
+            : (s.go_live && b.date >= s.go_live ? '<span class="pill warn">non envoyé</span>' : '<span class="small muted">avant le site</span>')}</td></tr>`).join('')}
+        </tbody></table>` : `<p class="muted" style="margin-top:0">${s.bank_import_at ? 'Aucun dépôt d\'espèces au relevé ce mois.' : 'Relevé pas encore importé.'}</p>`}
       </div>
       <div class="card">
         <h2>Google Sheet « Comptage coffre »</h2>

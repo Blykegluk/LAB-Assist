@@ -499,3 +499,63 @@ def test_admin_seal_endpoint(client):
     assert unseal(r["sealed"]) == "secret-value"
     r = client.post("/cash/admin/seal", headers=a, json={"value": "postgresql://u:p@127.0.0.1:1/x", "probe_database": True}).json()
     assert "sealed" not in r and r["attempts"][0]["error"]
+
+
+def test_bank_import_from_pennylane(client, monkeypatch):
+    from datetime import date as _d, timedelta as _td
+    w = _worker_headers()
+    o = _login(client, "owner-secret")
+    today = _d.today()
+    old = (today - _td(days=40)).isoformat()
+    recent = (today - _td(days=4)).isoformat()
+    # Le magasin utilise le site depuis 10 jours
+    from datetime import datetime as _dt
+    from sqlalchemy import select as _select
+    from backend.database import SessionLocal
+    from backend.cash_models import CashSubmission
+
+    db = SessionLocal()
+    try:
+        first = db.execute(_select(CashSubmission).where(CashSubmission.store_id == "ornano").order_by(CashSubmission.created_at)).scalars().first()
+        first.created_at = _dt.utcnow() - _td(days=10)
+        db.commit()
+    finally:
+        db.close()
+    txs = [
+        {"id": "pl-1", "date": recent, "amount": "1245.0", "label": "DPT VRAC ESP 0005179421  221026\nM BOUSKILA ANTHONY\n- 513845"},
+        {"id": "pl-2", "date": recent, "amount": "2535.84", "label": "CB JAB               221026\nCONTRAT 8045610"},  # carte : ignoré
+        {"id": "pl-3", "date": old, "amount": "7275.0", "label": "DPT VRAC ESP 0004841125  081026"},
+    ]
+    r = client.post("/cash/worker/bank-transactions", headers=w, json={"entity": "JAB", "transactions": txs})
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["store_id"] == "ornano" and res["added"] == 2 and res["ignored"] == 1
+    # réimport : mise à jour, pas de doublon
+    assert client.post("/cash/worker/bank-transactions", headers=w, json={"entity": "JAB", "transactions": txs}).json()["updated"] == 2
+    assert client.post("/cash/worker/bank-transactions", headers=w, json={"entity": "XYZ", "transactions": []}).status_code == 400
+    assert client.post("/cash/worker/bank-transactions", headers=_login(client, "2468"), json={"entity": "JAB", "transactions": []}).status_code == 401
+
+    d = client.get("/cash/dashboard?month=" + recent[:7], headers=o).json()
+    orn = next(s for s in d["stores"] if s["id"] == "ornano")
+    row = next(b for b in orn["bank_deposits"] if b["id"] == "pl-1")
+    assert row["bag_number"] == "0005179421" and row["amount"] == 1245.0
+    assert d["integrations"]["pennylane"]["ornano"] is True and d["integrations"]["store_labels"]["ornano"] == "Ornano"
+    assert orn["kpis"]["bank_cash_count"] >= 1
+
+    # Un dépôt bancaire récent sans bordereau envoyé, après le premier envoi du magasin : alerte
+    alerts = client.get("/cash/alerts", headers=o).json()["items"]
+    assert any(a["kind"] == "bank_without_docs" and "1 245,00 €" in a["title"] for a in alerts)
+    assert not any(a["kind"] == "bank_without_docs" and "7 275,00 €" in a["title"] for a in alerts)  # avant le site
+
+
+def test_calendar_neutral_before_first_submission(client):
+    from backend.cash_service import dashboard
+    from backend.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        d = dashboard(db, "leon_blum", "2026-01")  # mois bien antérieur au premier envoi
+    finally:
+        db.close()
+    lb = d["stores"][0]
+    assert lb["kpis"]["missing_days"] == 0 and {c["status"] for c in lb["calendar"]} <= {"before", "closed"}

@@ -10,6 +10,22 @@ from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
 
+class CashBankTransaction(Base):
+    """Dépôt d'espèces constaté sur le relevé bancaire (importé de Pennylane)."""
+
+    __tablename__ = "cash_bank_transactions"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)  # identifiant de la transaction Pennylane
+    entity: Mapped[str] = mapped_column(String(20), index=True)
+    store_id: Mapped[Optional[str]] = mapped_column(String(40), index=True, nullable=True)
+    tx_date: Mapped[date] = mapped_column(Date, index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    label: Mapped[str] = mapped_column(Text, default="")
+    bag_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(20), default="pennylane")
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class CashDocumentBlob(Base):
     """Contenu des photos gardé en base : le disque des hébergeurs gratuits (Render) s'efface au redémarrage."""
 

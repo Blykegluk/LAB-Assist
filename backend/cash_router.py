@@ -380,6 +380,25 @@ def admin_users(payload: AdminUsersIn, who: str = Depends(require_admin)):
     return {"accounts": stored, "overridden_by_env": bool(os.getenv("CASH_USERS"))}
 
 
+class BankImportIn(BaseModel):
+    entity: str  # AEJB, JAB
+    transactions: list[dict]  # [{id, date, amount, label}] tels que renvoyés par Pennylane
+
+
+@router.post("/worker/bank-transactions")
+def worker_bank_transactions(payload: BankImportIn, who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    """Import du relevé bancaire (dépôts d'espèces) depuis Pennylane, puis rapprochement."""
+    try:
+        res = svc.import_bank_transactions(db, payload.entity, payload.transactions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    store = store_by_id(res["store_id"])
+    r = svc.effective_rules(db)
+    res["bank_check"] = svc.check_bank(db, store, r)
+    res["without_docs"] = svc.check_bank_without_documents(db, store, r)
+    return res
+
+
 @router.post("/worker/checks")
 def worker_checks(who: str = Depends(require_worker), db: Session = Depends(get_db)):
     """Lance les contrôles et le récap e-mail (utile si le serveur a dormi)."""
