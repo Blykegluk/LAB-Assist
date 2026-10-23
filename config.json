@@ -1,5 +1,8 @@
 {
-  "stores": ["AEJB", "JAB"],
+  "stores": [
+    "AEJB",
+    "JAB"
+  ],
   "generated_dir": "generated",
   "pdf": {
     "title": "Contrat",
@@ -10,6 +13,44 @@
     "JAB": "templates/JAB_CDI_VENDEUR.txt"
   },
   "pdf_templates": {},
-  "docx_templates": {}
+  "docx_templates": {},
+  "cash": {
+    "stores": [
+      {
+        "id": "leon_blum",
+        "label": "Léon Blum",
+        "entity": "AEJB",
+        "color": "#2563eb",
+        "pos_system": "storemate",
+        "pos_store_numbers": [
+          "4920"
+        ],
+        "sheet_id": "1nS_uRDidp46mh1zl86nCQgJieMJLOXa8yL_TqigczoQ",
+        "pennylane_company_id": 22101920
+      },
+      {
+        "id": "ornano",
+        "label": "Ornano",
+        "entity": "JAB",
+        "color": "#059669",
+        "pos_system": "orika",
+        "pos_store_numbers": [
+          "4956"
+        ],
+        "sheet_id": "1GpUtf2Wh6t5yMD0xuN4jXZYJEsuY-9xcnT259OlxPtQ",
+        "pennylane_company_id": 22101953
+      }
+    ],
+    "rules": {
+      "ecart_threshold_eur": 10,
+      "missing_days_after": 5,
+      "undeposited_after_days": 7,
+      "bank_credit_after_days": 4,
+      "sheet_sync_hours": 6,
+      "digest_hour": 8,
+      "closed_weekdays": [],
+      "holidays": []
+    },
+    "docs_dir": "data/cash_docs"
+  }
 }
-

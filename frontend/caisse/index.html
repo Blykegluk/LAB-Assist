@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Suivi des espèces</title>
+  <meta name="description" content="Tableau de bord des dépôts d'espèces par magasin">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="icon" href="icon-192.png">
+  <style>
+    :root {
+      --bg: #f1f5f9; --card: #fff; --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; --soft: #f8fafc;
+      --ok: #059669; --ok-bg: #d1fae5; --warn: #d97706; --warn-bg: #fef3c7; --bad: #dc2626; --bad-bg: #fee2e2; --info: #2563eb; --info-bg: #dbeafe;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.45; }
+    a { color: var(--info); }
+    .wrap { max-width: 1240px; margin: 0 auto; padding: 16px; }
+    header.top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0 16px; }
+    header.top h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button, .btn { font-family: inherit; font-size: 14px; font-weight: 600; border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 10px; padding: 9px 14px; cursor: pointer; min-height: 38px; }
+    button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+    button.small { padding: 5px 10px; min-height: 30px; font-size: 13px; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .tabs { display: inline-flex; background: #e2e8f0; border-radius: 12px; padding: 4px; gap: 4px; }
+    .tabs button { border: 0; background: transparent; border-radius: 9px; padding: 7px 14px; }
+    .tabs button.active { background: #fff; box-shadow: 0 1px 3px rgba(15,23,42,.15); }
+    .month { display: inline-flex; align-items: center; gap: 6px; }
+    .month b { min-width: 130px; text-align: center; text-transform: capitalize; }
+    .card { background: var(--card); border-radius: 16px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 6px 20px rgba(15,23,42,.04); margin: 0 0 16px; }
+    .card h2 { font-size: 17px; margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
+    .store-head { display: flex; align-items: center; gap: 12px; margin: 22px 0 12px; }
+    .store-head .dot { width: 14px; height: 14px; border-radius: 4px; }
+    .store-head h2 { margin: 0; font-size: 20px; }
+    .store-head .meta { color: var(--muted); font-size: 13px; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .kpi { background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+    .kpi .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+    .kpi .v { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .kpi .s { font-size: 12px; color: var(--muted); }
+    .kpi.bad .v { color: var(--bad); } .kpi.ok .v { color: var(--ok); } .kpi.warn .v { color: var(--warn); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .card table { display: block; overflow-x: auto; }
+    td.date { white-space: nowrap; }
+    th, td { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--soft); }
+    .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+    .pill.ok { background: var(--ok-bg); color: #065f46; } .pill.bad { background: var(--bad-bg); color: #991b1b; } .pill.warn { background: var(--warn-bg); color: #92400e; } .pill.info { background: var(--info-bg); color: #1e3a8a; } .pill.muted { background: #e2e8f0; color: #334155; }
+    .alert { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 12px; margin: 6px 0; border: 1px solid var(--line); background: #fff; }
+    .alert.critical { border-color: #fecaca; background: #fff5f5; } .alert.warning { border-color: #fde68a; background: #fffbeb; } .alert.info { border-color: #bfdbfe; background: #eff6ff; }
+    .alert .t { font-weight: 700; } .alert .m { color: #334155; font-size: 13px; } .alert .d { color: var(--muted); font-size: 12px; }
+    .alert.acked { opacity: .55; }
+    .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+    .cal .h { font-size: 11px; color: var(--muted); text-align: center; font-weight: 700; text-transform: uppercase; }
+    .day { height: 34px; min-width: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 1px solid transparent; cursor: default; position: relative; }
+    .day.ok { background: var(--ok-bg); color: #065f46; }
+    .day.alert { background: var(--bad-bg); color: #991b1b; }
+    .day.missing { background: var(--warn-bg); color: #92400e; border-style: dashed; border-color: #f59e0b; }
+    .day.pending { background: #fff; color: var(--muted); border-color: var(--line); border-style: dashed; }
+    .day.closed { background: #f1f5f9; color: #cbd5e1; }
+    .day.future, .day.before { background: transparent; color: #cbd5e1; }
+    .day.empty { visibility: hidden; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 14px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+    .legend span::before { content: ''; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+    .legend .lg-ok::before { background: var(--ok-bg); } .legend .lg-alert::before { background: var(--bad-bg); } .legend .lg-missing::before { background: var(--warn-bg); border: 1px dashed #f59e0b; } .legend .lg-pending::before { background: #fff; border: 1px dashed var(--line); } .legend .lg-closed::before { background: #f1f5f9; }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; }
+    .status { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+    .status span { padding: 3px 9px; border-radius: 999px; background: #e2e8f0; color: #334155; }
+    .status span.on { background: var(--ok-bg); color: #065f46; } .status span.off { background: #e2e8f0; color: #64748b; }
+    .login { max-width: 380px; margin: 80px auto; }
+    input, textarea, select { font-family: inherit; font-size: 15px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; width: 100%; background: #fff; color: var(--ink); }
+    label { display: block; font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin: 10px 0 4px; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none; align-items: flex-start; justify-content: center; padding: 30px 12px; overflow: auto; z-index: 40; }
+    .modal-bg.open { display: flex; }
+    .modal { background: #fff; border-radius: 16px; width: min(960px, 100%); padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+    .modal h3 { margin: 0 0 10px; }
+    .docgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+    .docgrid a { display: block; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--soft); text-decoration: none; color: inherit; }
+    .docgrid img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
+    .docgrid .cap { padding: 6px 8px; font-size: 12px; }
+    .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; background: #0f172a; color: #fff; padding: 12px 16px; border-radius: 12px; display: none; z-index: 60; }
+    .hidden { display: none !important; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 700px) { .two { grid-template-columns: 1fr; } .wrap { padding: 10px; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <section id="login" class="login hidden">
+    <div class="card">
+      <h2>Suivi des espèces</h2>
+      <p class="muted">Accès réservé au gérant.</p>
+      <label for="uid">Identifiant</label>
+      <input id="uid" type="text" inputmode="numeric" autocomplete="username" placeholder="1">
+      <label for="pwd">Code</label>
+      <input id="pwd" type="password" inputmode="numeric" autocomplete="current-password">
+      <div style="height:12px"></div>
+      <button class="primary" id="btn-login" style="width:100%">Entrer</button>
+      <p id="login-err" class="small" style="color:var(--bad)"></p>
+    </div>
+  </section>
+
+  <section id="app" class="hidden">
+    <header class="top">
+      <div>
+        <h1>Suivi des espèces</h1>
+        <div class="status" id="integrations"></div>
+      </div>
+      <div class="controls">
+        <div class="month"><button class="small" id="m-prev">‹</button><b id="m-label"></b><button class="small" id="m-next">›</button></div>
+        <div class="tabs" id="store-tabs"></div>
+        <button id="btn-checks" title="Jours non traités, dépôts non crédités, sheets">Lancer les contrôles</button>
+        <button id="btn-sheets">Relire les sheets</button>
+        <button id="btn-settings">Réglages</button>
+        <a class="btn" href="/depots/" target="_blank" rel="noopener">App responsable ↗</a>
+        <button id="btn-logout" class="small">Déconnexion</button>
+      </div>
+    </header>
+
+    <div class="card" id="alerts-card">
+      <h2>À traiter <span class="pill bad" id="alerts-count">0</span></h2>
+      <div id="alerts"></div>
+      <div class="small muted" id="alerts-more"></div>
+    </div>
+
+    <div id="stores"></div>
+    <p class="small muted" id="footer"></p>
+  </section>
+</div>
+
+<div class="modal-bg" id="modal-bg"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const state = { token: localStorage.getItem('cash_owner_token') || '', month: new Date().toISOString().slice(0, 7), store: '', data: null, showAcked: false };
+  const EUR = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+  const FRD = (iso) => { if (!iso) return '—'; const [y, m, d] = iso.slice(0, 10).split('-'); return `${d}/${m}/${y}`; };
+  const FRDT = (iso) => iso ? new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const SEV = { critical: ['🔴', 'bad'], warning: ['🟠', 'warn'], info: ['🔵', 'info'] };
+  const BANK = { matched: ['Crédité', 'ok'], missing: ['Non crédité', 'bad'], pending: ['En attente', 'muted'], unchecked: ['Non vérifié', 'muted'] };
+  let toastTimer;
+  const toast = (m, ms = 3500) => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = 'none', ms); };
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({}, opts.headers || {}, state.token ? { Authorization: 'Bearer ' + state.token } : {});
+    const res = await fetch(path, Object.assign({}, opts, { headers }));
+    if ((res.status === 401 || res.status === 403) && !path.startsWith('/cash/auth')) { state.token = ''; localStorage.removeItem('cash_owner_token'); showLogin(); throw new Error('Connexion requise'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('Erreur ' + res.status));
+    return data;
+  }
+  function showLogin() { $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); }
+  $('#btn-login').onclick = async () => {
+    $('#login-err').textContent = '';
+    try {
+      const d = await api('/cash/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: $('#uid').value, code: $('#pwd').value }) });
+      if (d.role !== 'owner') { $('#login-err').textContent = 'Ce compte est celui de la responsable : le tableau de bord est réservé au gérant.'; return; }
+      state.token = d.token; localStorage.setItem('cash_owner_token', d.token); $('#pwd').value = ''; boot();
+    } catch (e) { $('#login-err').textContent = e.message.includes('incorrect') ? 'Identifiant ou code incorrect.' : e.message; }
+  };
+  $('#pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-login').click(); });
+  $('#btn-logout').onclick = () => { state.token = ''; localStorage.removeItem('cash_owner_token'); showLogin(); };
+
+  // ----- navigation
+  function monthLabel(m) { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); }
+  function shiftMonth(n) { const [y, m] = state.month.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); state.month = d.toISOString().slice(0, 7); load(); }
+  $('#m-prev').onclick = () => shiftMonth(-1); $('#m-next').onclick = () => shiftMonth(1);
+  $('#btn-checks').onclick = async () => { $('#btn-checks').disabled = true; try { const r = await api('/cash/checks/run', { method: 'POST' }); toast('Contrôles exécutés' + (r.notified_critical ? ` · ${r.notified_critical} alerte(s) critique(s) envoyée(s)` : '')); await load(); } catch (e) { toast(e.message); } $('#btn-checks').disabled = false; };
+  $('#btn-sheets').onclick = async () => { $('#btn-sheets').disabled = true; try { const r = await api('/cash/sheets/sync', { method: 'POST' }); const msgs = Object.entries(r).map(([k, v]) => `${k}: ${v.ok ? (v.tab || 'ok') : (v.reason || v.error)}`); toast(msgs.join(' · '), 6000); await load(); } catch (e) { toast(e.message); } $('#btn-sheets').disabled = false; };
+  $('#btn-settings').onclick = openSettings;
+
+  async function load() {
+    $('#m-label').textContent = monthLabel(state.month);
+    try {
+      state.data = await api(`/cash/dashboard?month=${state.month}${state.store ? '&store_id=' + state.store : ''}`);
+    } catch (e) { toast(e.message); return; }
+    render();
+  }
+
+  function render() {
+    const d = state.data;
+    const integ = d.integrations || {};
+    $('#integrations').innerHTML = [
+      ['E-mail alertes', integ.email], ['Google Sheets', integ.sheets],
+      ...Object.entries(integ.pennylane || {}).map(([k, v]) => ['Banque ' + (d.stores.find(s => s.id === k) || {}).label || k, v]),
+      ['Lecture des photos par ' + (integ.vision_provider === 'openai' ? 'OpenAI' : 'Claude'), !integ.vision_mock && integ.vision_key],
+    ].map(([l, on]) => `<span class="${on ? 'on' : 'off'}">${on ? '●' : '○'} ${esc(l)}${on ? '' : ' (non configuré)'}</span>`).join('');
+
+    // onglets magasins
+    const tabs = $('#store-tabs');
+    const allStores = (state.allStores || d.stores);
+    if (!state.allStores) state.allStores = d.stores.map(s => ({ id: s.id, label: s.label, color: s.color }));
+    tabs.innerHTML = `<button class="${state.store ? '' : 'active'}" data-s="">Tous</button>` + state.allStores.map(s => `<button class="${state.store === s.id ? 'active' : ''}" data-s="${s.id}">${esc(s.label)}</button>`).join('');
+    tabs.querySelectorAll('button').forEach(b => b.onclick = () => { state.store = b.dataset.s; load(); });
+
+    // alertes globales
+    const alerts = d.stores.flatMap(s => s.alerts).filter(a => state.showAcked || a.status === 'open');
+    const order = { critical: 0, warning: 1, info: 2 };
+    alerts.sort((a, b) => (order[a.severity] - order[b.severity]) || (b.created_at || '').localeCompare(a.created_at || ''));
+    const open = d.stores.flatMap(s => s.alerts).filter(a => a.status === 'open');
+    $('#alerts-count').textContent = open.length;
+    $('#alerts-count').className = 'pill ' + (open.some(a => a.severity === 'critical') ? 'bad' : open.length ? 'warn' : 'ok');
+    $('#alerts').innerHTML = alerts.length ? groupAlerts(alerts).map(renderAlert).join('') : '<p class="muted">Aucune alerte ouverte. 👍</p>';
+    const acked = d.stores.flatMap(s => s.alerts).filter(a => a.status === 'acked').length;
+    $('#alerts-more').innerHTML = acked ? `<a href="#" id="toggle-acked">${state.showAcked ? 'Masquer' : 'Afficher'} les ${acked} alerte(s) déjà vues</a>` : '';
+    const tg = $('#toggle-acked'); if (tg) tg.onclick = (e) => { e.preventDefault(); state.showAcked = !state.showAcked; render(); };
+    $('#alerts').querySelectorAll('[data-ack]').forEach(b => b.onclick = async () => { for (const id of b.dataset.ack.split(',')) await api(`/cash/alerts/${id}/ack`, { method: 'POST' }); load(); });
+    $('#alerts').querySelectorAll('[data-reopen]').forEach(b => b.onclick = async () => { await api(`/cash/alerts/${b.dataset.reopen}/reopen`, { method: 'POST' }); load(); });
+    $('#alerts').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+
+    $('#stores').innerHTML = d.stores.map(renderStore).join('');
+    $('#stores').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+    $('#footer').textContent = `Derniers contrôles automatiques : ${d.last_checks_at ? FRDT(d.last_checks_at) : 'jamais'} · Seuil d'alerte : ${EUR(d.rules.ecart_threshold_eur)} · Jour non traité après ${d.rules.missing_days_after} j · Dépôt attendu en banque sous ${d.rules.bank_credit_after_days} j`;
+  }
+
+  function groupAlerts(list) {
+    const out = [], miss = {};
+    for (const a of list) { if (a.kind === 'missing_day' && a.ref_date) (miss[a.store_id + '|' + a.status] = miss[a.store_id + '|' + a.status] || []).push(a); else out.push(a); }
+    for (const items of Object.values(miss)) {
+      items.sort((x, y) => x.ref_date.localeCompare(y.ref_date));
+      if (items.length === 1) { out.push(items[0]); continue; }
+      out.push(Object.assign({}, items[0], { ids: items.map(x => x.id), title: `${items.length} journées sans relevé de caisse`, message: 'Aucun relevé reçu couvrant : ' + items.map(x => FRD(x.ref_date)).join(', ') + '.' }));
+    }
+    const order = { critical: 0, warning: 1, info: 2 };
+    return out.sort((a, b) => (order[a.severity] - order[b.severity]) || (b.created_at || '').localeCompare(a.created_at || ''));
+  }
+  function renderAlert(a) {
+    const ids = (a.ids || [a.id]).join(',');
+    const [ico, cls] = SEV[a.severity] || SEV.info;
+    return `<div class="alert ${a.severity} ${a.status === 'acked' ? 'acked' : ''}">
+      <div>${ico}</div>
+      <div><div class="t">${esc(a.store_label)} · ${esc(a.title)}</div><div class="m">${esc(a.message)}</div>
+        <div class="d">${FRDT(a.created_at)}${a.notified_at ? ' · e-mail envoyé' : ''}${a.submission_id ? ` · <a href="#" data-sub="${a.submission_id}">voir l'envoi n°${a.submission_id}</a>` : ''}</div></div>
+      <div>${a.status === 'open' ? `<button class="small" data-ack="${ids}">Vu</button>` : `<button class="small" data-reopen="${a.id}">Rouvrir</button>`}</div>
+    </div>`;
+  }
+
+  function renderStore(s) {
+    const k = s.kpis;
+    const ecartCls = Math.abs(k.ecart_total || 0) >= (state.data.rules.ecart_threshold_eur || 10) ? 'bad' : (Math.abs(k.ecart_total || 0) >= 5 ? 'warn' : 'ok');
+    const bankTxt = (state.data.integrations.pennylane || {})[s.id] ? `${k.bank_matched}/${k.deposits_count}` : '—';
+    const sheet = s.sheet;
+    return `
+    <div class="store-head"><span class="dot" style="background:${s.color}"></span><h2>${esc(s.label)}</h2>
+      <span class="meta">${esc(s.entity || '')} · caisse ${esc(s.pos_system)} · dernier relevé : ${s.last_covered ? 'jusqu\'au ' + FRD(s.last_covered) : 'aucun'}</span></div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Espèces encaissées</div><div class="v">${EUR(k.cash_collected)}</div><div class="s">${k.submissions} envoi(s) ce mois</div></div>
+      <div class="kpi"><div class="l">Déposé en banque</div><div class="v">${EUR(k.deposited)}</div><div class="s">${k.deposits_count} dépôt(s)${k.expenses ? ' · factures espèces ' + EUR(k.expenses) : ''}</div></div>
+      <div class="kpi ${ecartCls}"><div class="l">Écart cumulé</div><div class="v">${k.ecart_total == null ? '—' : (k.ecart_total > 0 ? '−' : k.ecart_total < 0 ? '+' : '') + EUR(Math.abs(k.ecart_total))}</div><div class="s">${k.ecart_total > 0 ? 'moins déposé qu\'encaissé' : k.ecart_total < 0 ? 'plus déposé qu\'encaissé' : 'à l\'équilibre'}</div></div>
+      <div class="kpi ${k.critical_alerts ? 'bad' : k.open_alerts ? 'warn' : 'ok'}"><div class="l">Alertes ouvertes</div><div class="v">${k.open_alerts}</div><div class="s">${k.critical_alerts} critique(s)</div></div>
+      <div class="kpi ${k.missing_days ? 'warn' : 'ok'}"><div class="l">Jours non traités</div><div class="v">${k.missing_days}</div><div class="s">ce mois, hors délai</div></div>
+      <div class="kpi ${k.bank_missing ? 'bad' : 'ok'}"><div class="l">Crédités en banque</div><div class="v">${bankTxt}</div><div class="s">${k.bank_missing ? k.bank_missing + ' manquant(s)' : (k.bank_unchecked ? k.bank_unchecked + ' à vérifier' : 'tout est crédité')}</div></div>
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div class="card">
+        <h2>Journées du mois</h2>
+        ${renderCalendar(s.calendar)}
+        <div class="legend"><span class="lg-ok">relevé reçu</span><span class="lg-alert">relevé avec alerte</span><span class="lg-missing">non traité</span><span class="lg-pending">en attente (délai en cours)</span><span class="lg-closed">fermé</span></div>
+      </div>
+      <div class="card">
+        <h2>Envois confirmés</h2>
+        ${s.submissions.length ? `<table><thead><tr><th>Reçu le</th><th>Période</th><th class="num">Encaissé</th><th class="num">Déposé</th><th class="num">Écart</th><th></th></tr></thead><tbody>
+          ${s.submissions.map(x => `<tr class="clickable" data-sub="${x.id}"><td class="date">${FRDT(x.confirmed_at)}</td><td class="date">${esc(x.period || '')}${x.note ? `<div class="small muted">« ${esc(x.note)} »</div>` : ''}</td><td class="num">${EUR(x.expected_amount)}</td><td class="num">${EUR(x.deposit_amount)}</td><td class="num">${renderEcart(x.ecart)}</td><td class="small">📎 ${x.documents_count}</td></tr>`).join('')}
+        </tbody></table>` : '<p class="muted">Aucun envoi confirmé ce mois.</p>'}
+      </div>
+      <div class="card">
+        <h2>Dépôts et banque</h2>
+        ${s.deposits.length ? `<table><thead><tr><th>Date</th><th>Sac</th><th class="num">Bordereau</th><th class="num">Automate</th><th class="num">Retenu</th><th>Banque</th></tr></thead><tbody>
+          ${s.deposits.map(x => { const [bl, bc] = BANK[x.bank_status] || BANK.unchecked; return `<tr class="clickable" data-sub="${x.submission_id}"><td>${FRD(x.deposit_date)}</td><td class="small">${esc(x.bag_number || '—')}</td><td class="num">${EUR(x.slip_amount)}</td><td class="num">${EUR(x.receipt_amount)}</td><td class="num"><b>${EUR(x.amount)}</b></td><td><span class="pill ${bc}">${bl}</span>${x.bank_date ? `<div class="small muted">${FRD(x.bank_date)}</div>` : ''}</td></tr>`; }).join('')}
+        </tbody></table>` : '<p class="muted">Aucun dépôt ce mois.</p>'}
+      </div>
+      <div class="card">
+        <h2>Google Sheet « Comptage coffre »</h2>
+        ${sheet ? `
+          <p class="small muted">Onglet « ${esc(sheet.tab_title)} » lu le ${FRDT(sheet.fetched_at)}</p>
+          <div class="two">
+            <div class="kpi"><div class="l">Dépôts saisis (onglet)</div><div class="v">${EUR(sheet.totals && sheet.totals.deposits)}</div><div class="s">${(sheet.deposits || []).length} ligne(s)</div></div>
+            <div class="kpi"><div class="l">Écarts caissiers du mois</div><div class="v">${EUR(sheet.register_diffs_month)}</div><div class="s">somme des écarts de caisse saisis</div></div>
+            <div class="kpi"><div class="l">Factures espèces (onglet)</div><div class="v">${EUR(sheet.totals && sheet.totals.expenses)}</div></div>
+            <div class="kpi"><div class="l">Monnaie ajoutée (onglet)</div><div class="v">${EUR(sheet.totals && sheet.totals.coins_added)}</div></div>
+          </div>
+          ${Object.keys(sheet.register_diffs_by_person || {}).length ? `<table style="margin-top:10px"><thead><tr><th>Caissier</th><th class="num">Écart cumulé du mois</th></tr></thead><tbody>${Object.entries(sheet.register_diffs_by_person).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v]) => `<tr><td>${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>`).join('')}</tbody></table>` : ''}
+          ${sheet.count && sheet.count.ecart != null ? `<p class="small muted" style="margin-top:8px">Écart du dernier comptage coffre dans le sheet : <b>${EUR(sheet.count.ecart)}</b></p>` : ''}
+        ` : `<p class="muted">${s.sheet_error ? 'Erreur de lecture : ' + esc(s.sheet_error) : 'Pas encore lu. Configure le compte de service Google puis clique « Relire les sheets ».'}</p>`}
+        ${Object.keys(s.operators_diff || {}).length ? `<h2 style="margin-top:14px">Écarts par caissier (rapports Orika du mois)</h2><table><thead><tr><th>Opérateur</th><th class="num">Différence cumulée</th></tr></thead><tbody>${Object.entries(s.operators_diff).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v]) => `<tr><td>${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>`).join('')}</tbody></table>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function renderEcart(e, signedOnly) {
+    if (e === null || e === undefined) return '—';
+    const thr = (state.data && state.data.rules.ecart_threshold_eur) || 10;
+    const cls = Math.abs(e) >= thr ? 'bad' : Math.abs(e) >= 5 ? 'warn' : 'ok';
+    return `<span class="pill ${cls}">${e > 0 ? '−' : e < 0 ? '+' : ''}${EUR(Math.abs(e))}</span>`;
+  }
+
+  function renderCalendar(cal) {
+    if (!cal || !cal.length) return '';
+    const first = new Date(cal[0].date + 'T00:00:00');
+    const offset = (first.getDay() + 6) % 7;
+    const heads = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].map(h => `<div class="h">${h}</div>`).join('');
+    const blanks = Array.from({ length: offset }, () => '<div class="day empty"></div>').join('');
+    const TITLE = { ok: 'Relevé reçu', alert: 'Relevé reçu, alerte sur cet envoi', missing: 'Aucun relevé reçu', pending: 'Pas encore de relevé (délai en cours)', closed: 'Fermé', future: '', before: 'Avant le premier envoi' };
+    const days = cal.map(c => `<div class="day ${c.status}" title="${FRD(c.date)} : ${TITLE[c.status] || ''}" ${c.submissions && c.submissions.length ? `data-sub="${c.submissions[0]}" style="cursor:pointer"` : ''}>${Number(c.date.slice(8, 10))}</div>`).join('');
+    return `<div class="cal">${heads}${blanks}${days}</div>`;
+  }
+
+  // ----- détail d'un envoi
+  async function openSubmission(id) {
+    let s;
+    try { s = await api(`/cash/submissions/${id}`); } catch (e) { toast(e.message); return; }
+    const a = s.analysis || {};
+    const docs = (s.documents || []).map(d => `<a href="/cash/documents/${d.id}?token=${encodeURIComponent(state.token)}" target="_blank" rel="noopener">${d.mime === "application/pdf" || !(d.mime || "").startsWith("image/") ? `<div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;font-weight:800;color:#334155">${d.mime === "application/pdf" ? "PDF" : "Fichier"}</div>` : `<img src="/cash/documents/${d.id}?token=${encodeURIComponent(state.token)}" alt="${esc(d.filename)}" loading="lazy">`}<div class="cap">${esc(kindLabel(d.kind))}${d.confidence != null ? ` · ${Math.round(d.confidence * 100)} %` : ''}</div></a>`).join('');
+    const issues = (a.issues || []).map(i => `<div class="alert ${i.level === 'block' ? 'critical' : i.level}"><div>${i.level === 'block' ? '⛔' : i.level === 'warning' ? '⚠️' : 'ℹ️'}</div><div class="m">${esc(i.message)}</div><div></div></div>`).join('');
+    const reports = (a.reports || []).map(r => `<tr><td>${esc(r.pos_system)}</td><td>${FRD(r.period_start)} → ${FRD(r.period_end)}</td><td class="num">${EUR(r.cash_amount)}</td><td class="small muted">${esc(r.handwritten_notes || '')}</td></tr>`).join('');
+    const deps = (a.deposits || []).map(d => `<tr><td>${FRD(d.deposit_date)}</td><td>${esc(d.bag_number || '—')}</td><td class="num">${EUR(d.slip_amount)}</td><td class="num">${EUR(d.receipt_amount)}</td><td class="num"><b>${EUR(d.amount)}</b></td><td class="small">${(d.breakdown || []).map(b => `${b.count}×${b.denomination}`).join(' ')}</td></tr>`).join('');
+    const ops = (a.reports || []).flatMap(r => r.operators || []);
+    const opsTable = ops.length ? `<h3 style="margin-top:14px">Opérateurs (rapport Orika)</h3><table><thead><tr><th>Opérateur</th><th class="num">Fond de caisse</th><th class="num">Espèces</th><th class="num">Prélèvement</th><th class="num">Théorique</th><th class="num">Déclaré</th><th class="num">Différence</th></tr></thead><tbody>${ops.map(o => `<tr><td>${esc(o.name)}</td><td class="num">${EUR(o.fdc)}</td><td class="num">${EUR(o.cash)}</td><td class="num">${EUR(o.prelevement)}</td><td class="num">${EUR(o.theorique)}</td><td class="num">${EUR(o.declaration)}</td><td class="num">${renderEcart(-(o.difference || 0), true)}</td></tr>`).join('')}</tbody></table>` : '';
+    $('#modal').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>${esc(s.store_label)} · envoi n°${s.id} · ${esc(s.period || '')}</h3><button class="small" id="modal-close">Fermer</button></div>
+      <p class="small muted">Reçu le ${FRDT(s.created_at)} · ${s.status === 'confirmed' ? 'confirmé le ' + FRDT(s.confirmed_at) : s.status}${s.note ? ` · remarque : « ${esc(s.note)} »` : ''}</p>
+      <div class="kpis">
+        <div class="kpi"><div class="l">Espèces encaissées</div><div class="v">${EUR(a.cash_collected)}</div></div>
+        ${a.expenses_total ? `<div class="kpi"><div class="l">Factures espèces</div><div class="v">− ${EUR(a.expenses_total)}</div></div>` : ''}
+        <div class="kpi"><div class="l">Déposé</div><div class="v">${EUR(a.deposit_amount)}</div></div>
+        <div class="kpi"><div class="l">Écart</div><div class="v">${renderEcart(a.ecart)}</div>${a.coins_estimate != null ? `<div class="s">dont pièces estimées ${EUR(a.coins_estimate)}</div>` : ''}</div>
+      </div>
+      ${issues ? `<div style="margin-top:10px">${issues}</div>` : ''}
+      ${reports ? `<h3 style="margin-top:14px">Relevés</h3><table><thead><tr><th>Caisse</th><th>Période</th><th class="num">Espèces</th><th>Note manuscrite</th></tr></thead><tbody>${reports}</tbody></table>` : ''}
+      ${deps ? `<h3 style="margin-top:14px">Dépôts</h3><table><thead><tr><th>Date</th><th>Sac</th><th class="num">Bordereau</th><th class="num">Automate</th><th class="num">Retenu</th><th>Coupures</th></tr></thead><tbody>${deps}</tbody></table>` : ''}
+      ${(s.bank || []).length ? `<p class="small" style="margin-top:8px">Banque : ${s.bank.map(b => { const [bl, bc] = BANK[b.bank_status] || BANK.unchecked; return `<span class="pill ${bc}">${bl}</span> ${b.bank_date ? FRD(b.bank_date) + ' ' : ''}${b.bank_amount ? EUR(b.bank_amount) : ''}`; }).join(' · ')}</p>` : ''}
+      ${opsTable}
+      <h3 style="margin-top:14px">Documents</h3><div class="docgrid">${docs || '<p class="muted">Aucun document.</p>'}</div>
+      ${s.status === 'confirmed' ? `<p style="margin-top:14px"><button class="small" id="modal-cancel">Annuler cet envoi (erreur de saisie)</button></p>` : ''}`;
+    $('#modal-bg').classList.add('open');
+    $('#modal-close').onclick = closeModal;
+    const mc = $('#modal-cancel'); if (mc) mc.onclick = async () => { if (!confirm('Annuler cet envoi ? Ses relevés et dépôts ne compteront plus dans la synthèse.')) return; await api(`/cash/submissions/${s.id}/cancel`, { method: 'POST' }); closeModal(); load(); };
+  }
+  function kindLabel(k) { return { releve_storemate: 'Relevé storeMate', releve_orika: 'Rapport Orika', bordereau: 'Bordereau', recu_gab: 'Ticket automate', facture: 'Facture', autre: 'Non reconnu' }[k] || k; }
+  function closeModal() { $('#modal-bg').classList.remove('open'); }
+  $('#modal-bg').addEventListener('click', (e) => { if (e.target === $('#modal-bg')) closeModal(); });
+
+  // ----- réglages
+  async function openSettings() {
+    let r; try { r = (await api('/cash/settings')).rules; } catch (e) { toast(e.message); return; }
+    const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+    $('#modal').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center"><h3>Réglages des alertes</h3><button class="small" id="modal-close">Fermer</button></div>
+      <div class="two">
+        <div><label>Seuil d'écart (€) déclenchant une alerte</label><input id="st-thr" type="number" step="0.5" value="${r.ecart_threshold_eur}"></div>
+        <div><label>Journée « non traitée » après (jours)</label><input id="st-miss" type="number" value="${r.missing_days_after}"></div>
+        <div><label>Espèces non déposées après (jours)</label><input id="st-undep" type="number" value="${r.undeposited_after_days}"></div>
+        <div><label>Dépôt attendu en banque sous (jours)</label><input id="st-bank" type="number" value="${r.bank_credit_after_days}"></div>
+        <div><label>Relecture des sheets toutes les (heures)</label><input id="st-sheet" type="number" value="${r.sheet_sync_hours}"></div>
+        <div><label>Heure du récap e-mail quotidien</label><input id="st-digest" type="number" min="0" max="23" value="${r.digest_hour}"></div>
+      </div>
+      <label>Jours de fermeture hebdomadaire</label>
+      <div class="status">${days.map((d, i) => `<label style="display:inline-flex;align-items:center;gap:6px;text-transform:none;font-weight:500;font-size:14px;margin:0 10px 0 0"><input type="checkbox" class="st-closed" value="${i}" style="width:auto" ${(r.closed_weekdays || []).includes(i) ? 'checked' : ''}>${d}</label>`).join('')}</div>
+      <label>Jours fériés / fermetures exceptionnelles (une date AAAA-MM-JJ par ligne)</label>
+      <textarea id="st-hol" rows="4">${(r.holidays || []).join('\n')}</textarea>
+      <p style="margin-top:14px"><button class="primary" id="st-save">Enregistrer</button> <button class="small" id="st-digest-now">Envoyer le récap e-mail maintenant</button></p>`;
+    $('#modal-bg').classList.add('open');
+    $('#modal-close').onclick = closeModal;
+    $('#st-digest-now').onclick = async () => { try { const d = await api('/cash/digest/send', { method: 'POST' }); toast(d.sent ? `Récap envoyé (${d.count} alerte(s))` : 'Rien envoyé : ' + (d.reason || 'e-mail non configuré')); } catch (e) { toast(e.message); } };
+    $('#st-save').onclick = async () => {
+      const payload = {
+        ecart_threshold_eur: Number($('#st-thr').value), missing_days_after: Number($('#st-miss').value), undeposited_after_days: Number($('#st-undep').value),
+        bank_credit_after_days: Number($('#st-bank').value), sheet_sync_hours: Number($('#st-sheet').value), digest_hour: Number($('#st-digest').value),
+        closed_weekdays: [...document.querySelectorAll('.st-closed:checked')].map(c => Number(c.value)),
+        holidays: $('#st-hol').value.split('\n').map(x => x.trim()).filter(Boolean),
+      };
+      try { await api('/cash/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); toast('Réglages enregistrés'); closeModal(); load(); } catch (e) { toast(e.message); }
+    };
+  }
+
+  async function boot() {
+    $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+    try { const me = await api('/cash/me'); if (me.role !== 'owner') throw new Error('owner'); } catch (e) { showLogin(); return; }
+    load();
+  }
+  if (state.token) boot(); else showLogin();
+})();
+</script>
+</body>
+</html>

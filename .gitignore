@@ -17,3 +17,6 @@ Thumbs.db
 .vscode/
 .idea/
 
+
+# Documents de caisse (photos envoyées par la responsable)
+data/
