@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -52,6 +52,17 @@ def list_stores(user: User = Depends(require_any)):
     return {"stores": [{"id": s["id"], "label": s["label"], "entity": s["entity"], "color": s["color"], "pos_system": s["pos_system"]} for s in config_stores()]}
 
 
+def _storage():
+    """Supabase Storage si configuré (SUPABASE_URL, SUPABASE_SERVICE_ROLE, SUPABASE_BUCKET), sinon None."""
+    try:
+        from storage import SupabaseStorageClient
+
+        client = SupabaseStorageClient()
+        return client if client.is_configured() else None
+    except Exception:
+        return None
+
+
 def _safe_name(name: str) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "photo")
     return name[:120] or "photo"
@@ -81,6 +92,7 @@ async def create_submission(
     folder = docs_dir() / store_id / f"{date.today():%Y-%m}" / str(sub.id)
     folder.mkdir(parents=True, exist_ok=True)
     extractor = get_extractor()
+    storage = _storage()
     extracted_pairs: list[tuple[int, dict]] = []
     for uf in files:
         content = await uf.read()
@@ -92,6 +104,14 @@ async def create_submission(
         fname = f"{uuid.uuid4().hex[:8]}_{_safe_name(uf.filename or 'photo.jpg')}"
         path = folder / fname
         path.write_bytes(content)
+        remote_path = None
+        if storage is not None:
+            remote_path = f"cash/{store_id}/{date.today():%Y-%m}/{sub.id}/{fname}"
+            try:
+                storage.upload_bytes(remote_path, content, content_type=uf.content_type or "image/jpeg")
+            except Exception as e:
+                log.warning("copie Supabase Storage échouée pour %s : %s", fname, e)
+                remote_path = None
         try:
             extracted = extractor.extract(content, mime, uf.filename or "")
         except Exception as e:
@@ -99,7 +119,8 @@ async def create_submission(
             extracted = {"type": "autre", "confidence": 0, "warnings": [f"Analyse impossible : {e}"]}
         doc = CashDocument(
             submission_id=sub.id, store_id=store_id, kind=str(extracted.get("type") or "autre"), filename=uf.filename or fname,
-            path=str(path), mime=mime, confidence=svc.to_float(extracted.get("confidence")), extracted_json=json.dumps(extracted, ensure_ascii=False),
+            path=str(path), remote_path=remote_path, mime=mime, confidence=svc.to_float(extracted.get("confidence")),
+            extracted_json=json.dumps(extracted, ensure_ascii=False),
         )
         db.add(doc)
         db.flush()
@@ -175,9 +196,18 @@ def get_submission(submission_id: int, user: User = Depends(require_any), db: Se
 @router.get("/documents/{document_id}")
 def get_document(document_id: int, user: User = Depends(require_any), db: Session = Depends(get_db)):
     doc = db.get(CashDocument, document_id)
-    if not doc or not pathlib.Path(doc.path).exists():
+    if not doc:
         raise HTTPException(status_code=404, detail="Document introuvable")
-    return FileResponse(doc.path, media_type=doc.mime, filename=doc.filename)
+    if pathlib.Path(doc.path).exists():
+        return FileResponse(doc.path, media_type=doc.mime, filename=doc.filename)
+    storage = _storage()
+    if doc.remote_path and storage is not None:
+        try:
+            data = storage.download_bytes(doc.remote_path)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Document indisponible : {e}")
+        return Response(content=data, media_type=doc.mime, headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
+    raise HTTPException(status_code=404, detail="Document introuvable (fichier local perdu, pas de copie distante)")
 
 
 @router.get("/manager/recent")

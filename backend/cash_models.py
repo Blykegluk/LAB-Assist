@@ -39,6 +39,7 @@ class CashDocument(Base):
     kind: Mapped[str] = mapped_column(String(30), default="autre", index=True)
     filename: Mapped[str] = mapped_column(String(300))
     path: Mapped[str] = mapped_column(String(600))
+    remote_path: Mapped[Optional[str]] = mapped_column(String(600), nullable=True)  # objet Supabase Storage (copie durable)
     mime: Mapped[str] = mapped_column(String(80), default="image/jpeg")
     confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     extracted_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

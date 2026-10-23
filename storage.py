@@ -40,6 +40,17 @@ class SupabaseStorageClient:
         public_url = f"{self.base_url.rstrip('/')}/storage/v1/object/public/{self.bucket}/{object_name.lstrip('/')}"
         return public_url
 
+    def download_bytes(self, object_name: str) -> bytes:
+        """Télécharge un objet (fonctionne aussi sur un bucket privé grâce à la clé service)."""
+        if not self.is_configured():
+            raise RuntimeError("Supabase Storage non configuré")
+        url = f"{self.base_url.rstrip('/')}/storage/v1/object/{self.bucket}/{object_name.lstrip('/')}"
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(url, headers={"Authorization": f"Bearer {self.service_key}"})
+            if resp.status_code != 200:
+                raise RuntimeError(f"Echec téléchargement Supabase: {resp.status_code}")
+            return resp.content
+
     def upload_file(self, file_path: Path, object_name: Optional[str] = None, content_type: str = "application/pdf") -> str:
         object_name = object_name or file_path.name
         data = file_path.read_bytes()

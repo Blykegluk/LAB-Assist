@@ -60,6 +60,17 @@ Par défaut, les photos sont lues par Claude via le SDK Anthropic (modèle `clau
 - Variables d'environnement : voir `.env.example`.
 - Les photos sont stockées dans `data/cash_docs/<magasin>/<AAAA-MM>/<envoi>/` (à sauvegarder ; sur un hébergeur à disque éphémère, prévoir un volume persistant).
 
+## Déploiement sur Render (service existant « LAB-Assist »)
+Le service Render déploie la branche principale du dépôt GitHub : fusionner la branche du module dans `main` déclenche le déploiement. Les nouvelles pages sont alors `https://<service>.onrender.com/depots/` et `/caisse/`.
+
+À régler dans Render → Environment :
+- `CASH_USERS`, `CASH_SECRET`, `ANTHROPIC_API_KEY`, `CASH_PUBLIC_URL`
+- `DATABASE_URL` vers un PostgreSQL (Supabase, Neon, Render Postgres…). Sans cela, la base SQLite est effacée à chaque déploiement ou redémarrage.
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE`, `SUPABASE_BUCKET` : copie durable des photos (le disque local de Render gratuit est effacé à chaque déploiement ; le site relit alors les photos depuis Supabase Storage).
+- SMTP, Google (`GOOGLE_SERVICE_ACCOUNT_JSON`) et Pennylane selon les intégrations voulues.
+
+Offre gratuite Render : le service s'endort après 15 minutes sans trafic (premier chargement jusqu'à une minute) et les contrôles automatiques ne tournent pas pendant le sommeil. Deux options : un moniteur UptimeRobot qui appelle `/health` toutes les 5 minutes, ou passer en instance Starter.
+
 ## Tests
 ```
 pip install -r requirements.txt pytest
