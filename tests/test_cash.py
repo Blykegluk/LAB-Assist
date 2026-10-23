@@ -476,3 +476,26 @@ def test_supabase_direct_url_gets_pooler_candidates(monkeypatch):
     assert cands[0].host == "aws-0-eu-west-1.pooler.supabase.com" and cands[1].host == "aws-1-eu-west-1.pooler.supabase.com"
     assert cands[0].username == "postgres.frnmfmwmgzgbupqaxhgo" and cands[0].password == "secret" and cands[0].port == 5432
     assert _supabase_pooler_candidates(make_url("postgresql+psycopg://u:p@my-db.example.com/x")) == []
+
+
+def test_sealed_values(monkeypatch):
+    from backend import sealed
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-server-only")
+    monkeypatch.delenv("CASH_SEAL_KEY", raising=False)
+    tok = sealed.seal("postgresql://u:p@h/db")
+    assert tok.startswith("v1.") and "p@h" not in tok and sealed.unseal(tok) == "postgresql://u:p@h/db"
+    assert sealed.unseal(tok[:-4] + "AAAA") is None  # altéré
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-autre-cle")
+    assert sealed.unseal(tok) is None  # autre serveur
+
+
+def test_admin_seal_endpoint(client):
+    a = {"Authorization": "Bearer test-admin-token"}
+    assert client.post("/cash/admin/seal", json={"value": "x"}).status_code == 401
+    r = client.post("/cash/admin/seal", headers=a, json={"value": "secret-value"}).json()
+    from backend.sealed import unseal
+
+    assert unseal(r["sealed"]) == "secret-value"
+    r = client.post("/cash/admin/seal", headers=a, json={"value": "postgresql://u:p@127.0.0.1:1/x", "probe_database": True}).json()
+    assert "sealed" not in r and r["attempts"][0]["error"]
