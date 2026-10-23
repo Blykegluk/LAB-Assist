@@ -102,6 +102,29 @@ def require_any(request: Request) -> User:
     return u
 
 
+def worker_token() -> str:
+    """Jeton de la tâche Claude planifiée qui analyse les photos (accès limité à la file d'analyse).
+
+    CASH_WORKER_TOKEN s'il est défini, sinon dérivé de CASH_SECRET (rien de plus à configurer).
+    """
+    explicit = os.getenv("CASH_WORKER_TOKEN")
+    if explicit:
+        return explicit
+    return hmac.new(_secret(), b"cash-worker", hashlib.sha256).hexdigest()
+
+
+def require_worker(request: Request) -> str:
+    """Accepte le jeton de la tâche d'analyse, ou un gérant connecté (pour lancer l'analyse à la main)."""
+    auth = request.headers.get("authorization") or ""
+    token = auth[7:] if auth.lower().startswith("bearer ") else ""
+    if token and hmac.compare_digest(token, worker_token()):
+        return "worker"
+    u = parse_token(token) if token else None
+    if u and u.role == "owner":
+        return f"owner:{u.id}"
+    raise HTTPException(status_code=401, detail="Jeton d'analyse invalide")
+
+
 def require_owner(request: Request) -> User:
     u = current_user(request)
     if not u:

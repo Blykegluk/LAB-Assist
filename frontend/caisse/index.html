@@ -192,8 +192,10 @@
     $('#integrations').innerHTML = [
       ['E-mail alertes', integ.email], ['Google Sheets', integ.sheets],
       ...Object.entries(integ.pennylane || {}).map(([k, v]) => ['Banque ' + (d.stores.find(s => s.id === k) || {}).label || k, v]),
-      ['Lecture des photos par ' + (integ.vision_provider === 'openai' ? 'OpenAI' : 'Claude'), !integ.vision_mock && integ.vision_key],
-    ].map(([l, on]) => `<span class="${on ? 'on' : 'off'}">${on ? '●' : '○'} ${esc(l)}${on ? '' : ' (non configuré)'}</span>`).join('');
+      integ.analysis_mode === 'deferred'
+        ? ['Analyse Claude ' + (integ.analysis_times || []).join(' et ') + (integ.last_worker_run_at ? ' · dernier passage ' + FRDT(integ.last_worker_run_at) : ' · aucun passage encore'), !!integ.last_worker_run_at, true]
+        : ['Lecture des photos par ' + (integ.vision_provider === 'openai' ? 'OpenAI' : 'Claude'), !integ.vision_mock && integ.vision_key],
+    ].map(([l, on, noSuffix]) => `<span class="${on ? 'on' : 'off'}">${on ? '●' : '○'} ${esc(l)}${on || noSuffix ? '' : ' (non configuré)'}</span>`).join('');
 
     // onglets magasins
     const tabs = $('#store-tabs');
@@ -268,6 +270,7 @@
       </div>
       <div class="card">
         <h2>Envois confirmés</h2>
+        ${(s.queued || []).length ? `<p class="small" style="margin:0 0 8px"><span class="pill info">${s.queued.length} en attente d'analyse</span> ${s.queued.map(q => `${FRDT(q.created_at)} (${q.documents_count} photo${q.documents_count > 1 ? 's' : ''}${q.note ? ', « ' + esc(q.note) + ' »' : ''})`).join(' · ')}</p>` : ''}
         ${s.submissions.length ? `<table><thead><tr><th>Reçu le</th><th>Période</th><th class="num">Encaissé</th><th class="num">Déposé</th><th class="num">Écart</th><th></th></tr></thead><tbody>
           ${s.submissions.map(x => `<tr class="clickable" data-sub="${x.id}"><td class="date">${FRDT(x.confirmed_at)}</td><td class="date">${esc(x.period || '')}${x.note ? `<div class="small muted">« ${esc(x.note)} »</div>` : ''}</td><td class="num">${EUR(x.expected_amount)}</td><td class="num">${EUR(x.deposit_amount)}</td><td class="num">${renderEcart(x.ecart)}</td><td class="small">📎 ${x.documents_count}</td></tr>`).join('')}
         </tbody></table>` : '<p class="muted">Aucun envoi confirmé ce mois.</p>'}
