@@ -53,6 +53,7 @@
     },
     "docs_dir": "data/cash_docs",
     "admin_token_sha256": "930f3f6141bb3c046ac9ae54f34a67a79d054aba6afdfd0562fd728831fb2ac3",
-    "worker_token_sha256": "106030483ad58f7e39af89602d2561c0378768c68c25ff4379957f16a400b969"
+    "worker_token_sha256": "106030483ad58f7e39af89602d2561c0378768c68c25ff4379957f16a400b969",
+    "sealed_database_url": "v1.zPSBhI2uQteAtKGHdjZj7NIwrH2KIKfDJH98otIEPrkkleQpsz3b4QHlPrrpHf6ybI8GaTYyn8rjhRJYnU1dnpeXv8WgJTGJUc57GQ68j90wTM_nMPog-_0-fU8w7ooLT6_rkE_s8JtBGsMTjKYL-pXa0uhj43czLtZllDVU8jM73yGcLCKHH3tOv4cHqiWJbcvCZsxkwuNMgqu4RgNwhvemy2kWmT2_mFqeEMGGybKgQfdEXT4ycSymiiZf_msNRCV_K5FhmQ=="
   }
 }
