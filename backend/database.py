@@ -71,8 +71,30 @@ def _supabase_pooler_candidates(url):
     return out
 
 
+def _sealed_database_url() -> Optional[str]:
+    """Adresse de base chiffrée par le serveur lui-même (config.json, cash.sealed_database_url)."""
+    try:
+        import json
+        import pathlib
+
+        from .sealed import unseal
+
+        cfg = json.loads((pathlib.Path(__file__).resolve().parent.parent / "config.json").read_text(encoding="utf-8-sig"))
+        token = (cfg.get("cash") or {}).get("sealed_database_url")
+        if not token:
+            return None
+        value = unseal(token)
+        DB_DIAG["sealed"] = "ok" if value else "illisible (clé différente)"
+        return value
+    except Exception as e:  # noqa: BLE001
+        DB_DIAG["sealed"] = f"erreur : {type(e).__name__}"
+        return None
+
+
 def _get_database_url() -> str:
-    raw = (os.getenv("DATABASE_URL") or "").strip()
+    sealed = None if os.getenv("DB_IGNORE_SEALED") in ("1", "true") else _sealed_database_url()
+    raw = (sealed or os.getenv("DATABASE_URL") or "").strip()
+    DB_DIAG["source"] = "sealed" if sealed else ("env" if raw else "sqlite")
     if not raw:
         return "sqlite:///./data.db"  # développement local
     DB_DIAG["configured"] = True

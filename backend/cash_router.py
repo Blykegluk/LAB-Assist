@@ -324,6 +324,44 @@ def admin_diag(who: str = Depends(require_admin), db: Session = Depends(get_db))
     }
 
 
+class AdminSealIn(BaseModel):
+    value: str
+    probe_database: bool = False  # tester la valeur comme adresse de base (et le pooler Supabase) avant de sceller
+
+
+@router.post("/admin/seal")
+def admin_seal(payload: AdminSealIn, who: str = Depends(require_admin)):
+    """Chiffre une valeur avec la clé du serveur. Le résultat peut être versionné sans risque."""
+    from sqlalchemy.engine import make_url
+
+    from .database import _can_connect, _normalize, _supabase_pooler_candidates
+    from .sealed import available, seal
+
+    if not available():
+        raise HTTPException(status_code=400, detail="Aucune clé de scellement sur le serveur")
+    value = payload.value.strip()
+    out: dict = {}
+    if payload.probe_database:
+        url = make_url(_normalize(value))
+        attempts = []
+        working = None
+        for cand in [url] + _supabase_pooler_candidates(url):
+            err = _can_connect(cand, timeout=5)
+            attempts.append({"host": cand.host, "user": cand.username, "error": err})
+            if err is None:
+                working = cand
+                break
+            if err and "password authentication failed" in err:
+                break
+        out["attempts"] = attempts
+        if working is None:
+            return out
+        value = working.render_as_string(hide_password=False)
+        out["working_host"] = working.host
+    out["sealed"] = seal(value)
+    return out
+
+
 class AdminUsersIn(BaseModel):
     users: str  # identifiant:code:role[:libellé],...
 
