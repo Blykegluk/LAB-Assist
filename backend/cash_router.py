@@ -374,6 +374,23 @@ def admin_seal(payload: AdminSealIn, who: str = Depends(require_admin)):
     return out
 
 
+class AdminRoutineIn(BaseModel):
+    url: str
+    token: str
+
+
+@router.put("/admin/routine")
+def admin_routine(payload: AdminRoutineIn, who: str = Depends(require_admin), db: Session = Depends(get_db)):
+    """Déclencheur API de la tâche d'analyse (créé dans claude.ai/code/routines), gardé scellé en base."""
+    from . import cash_routine
+
+    try:
+        cash_routine.store(db, payload.url, payload.token)
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "configured": cash_routine.configured()}
+
+
 class AdminUsersIn(BaseModel):
     users: str  # identifiant:code:role[:libellé],...
 

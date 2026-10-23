@@ -562,45 +562,68 @@ def test_calendar_neutral_before_first_submission(client):
 
 
 def test_manual_analysis_request(client, monkeypatch):
-    from datetime import datetime as _dt
+    """« Analyser maintenant » lance la tâche Claude tout de suite via son déclencheur API."""
+    import httpx
     from backend import cash_service as svc
     from backend.database import SessionLocal
 
     monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
-    monkeypatch.delenv("CASH_ANALYSIS_TIMES", raising=False)
+    monkeypatch.delenv("CASH_ROUTINE_FIRE_URL", raising=False)
+    monkeypatch.delenv("CASH_ROUTINE_TOKEN", raising=False)
     o = _login(client, "owner-secret")
-    w = _worker_headers()
+    a = {"Authorization": "Bearer test-admin-token"}
     db = SessionLocal()
-    try:
-        # vider la file laissée par les autres tests
+    try:  # vider la file laissée par les autres tests
         for item in svc.queue_items(db):
-            sub = db.get(svc.CashSubmission, item["submission_id"])
-            sub.status = "cancelled"
+            db.get(svc.CashSubmission, item["submission_id"]).status = "cancelled"
         db.commit()
-        assert svc.analysis_should_run(db, _dt(2026, 10, 23, 15, 5))["run"] is False
     finally:
         db.close()
-    assert client.post("/cash/analysis/request", headers=o).json()["requested"] is False  # rien en attente
     assert client.post("/cash/analysis/request", headers=_login(client, "2468")).status_code == 403
 
-    sid = _deferred_upload(client, _login(client, "2468"), "leon_blum", ["z.jpg"])["submission_id"]
+    # Sans déclencheur configuré : la demande est notée, l'analyse attend le prochain créneau
+    r = client.post("/cash/analysis/request", headers=o).json()
+    assert r["fired"] is False and "pas encore activé" in r["message"]
+
+    # Configuration du déclencheur (scellé en base), contrôles de forme
+    bad = client.put("/cash/admin/routine", headers=a, json={"url": "https://evil.example.com/fire", "token": "x" * 30})
+    assert bad.status_code == 400
+    url = "https://api.anthropic.com/v1/claude_code/routines/trig_TEST/fire"
+    assert client.put("/cash/admin/routine", headers=a, json={"url": url, "token": "sk-ant-oat01-" + "y" * 30}).json()["configured"] is True
     db = SessionLocal()
     try:
-        assert svc.analysis_should_run(db, _dt(2026, 10, 23, 15, 5))["run"] is False  # hors créneau, pas de demande
-        assert svc.analysis_should_run(db, _dt(2026, 10, 23, 18, 5)) == {"run": True, "reason": "créneau prévu", "queued": 1, "requested_at": None}
+        raw = db.get(svc.CashSetting, "sealed_routine_fire").value
     finally:
         db.close()
-    r = client.post("/cash/analysis/request", headers=o).json()
-    assert r["requested"] is True and r["queued"] == 1 and "vers" in r["message"]
-    sr = client.get("/cash/worker/should-run", headers=w).json()
-    assert sr["run"] is True and sr["reason"] == "demande manuelle"
-    d = client.get("/cash/dashboard", headers=o).json()["integrations"]
-    assert d["analysis_requested_at"] and d["queued_total"] == 1
+    assert "sk-ant-oat01" not in raw and "trig_TEST" not in raw
 
-    # La tâche traite l'envoi puis lance les contrôles : la demande est soldée
-    doc_id = _queue_item(client, sid)["documents"][0]["id"]
-    client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w,
-                json={"documents": [{"document_id": doc_id, "extraction": {"type": "autre", "confidence": 0.2}}]})
-    client.post("/cash/worker/checks", headers=w)
-    sr = client.get("/cash/worker/should-run", headers=w).json()
-    assert sr["run"] is False and sr["requested_at"] is None
+    calls = []
+
+    class _Resp:
+        status_code = 200
+        content = b"x"
+
+        def json(self):
+            return {"type": "routine_fire", "claude_code_session_url": "https://claude.ai/code/session_X"}
+
+    def fake_post(u, headers=None, json=None, timeout=None):
+        calls.append((u, headers, json))
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    r = client.post("/cash/analysis/request", headers=o).json()
+    assert r["fired"] is True and r["session_url"] == "https://claude.ai/code/session_X" and "lancée" in r["message"]
+    u, h, body = calls[0]
+    assert u == url and h["Authorization"].startswith("Bearer sk-ant-oat01-") and h["anthropic-beta"] == "experimental-cc-routine-2026-04-01"
+    # Double clic : pas de second lancement pendant 3 minutes
+    r = client.post("/cash/analysis/request", headers=o).json()
+    assert r["fired"] is False and len(calls) == 1
+    d = client.get("/cash/dashboard", headers=o).json()["integrations"]
+    assert d["routine_fire_ready"] is True and d["routine_fired_at"]
+    # La tâche lit should-run : la demande manuelle déclenche le travail s'il y a des photos
+    sid = _deferred_upload(client, _login(client, "2468"), "leon_blum", ["z.jpg"])["submission_id"]
+    sr = client.get("/cash/worker/should-run", headers=_worker_headers()).json()
+    assert sr["run"] is True and sr["reason"] == "demande manuelle"
+    client.post(f"/cash/submissions/{sid}/cancel", headers=o)
+    client.post("/cash/worker/checks", headers=_worker_headers())
+    assert client.get("/cash/worker/should-run", headers=_worker_headers()).json()["requested_at"] is None

@@ -13,7 +13,7 @@ from typing import Any, Iterable, Optional
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import Session
 
-from . import cash_bank, cash_notify
+from . import cash_bank, cash_notify, cash_routine
 from .cash_config import rules as config_rules, stores as config_stores, store_by_id
 from .cash_models import (
     CashAlert,
@@ -737,19 +737,32 @@ def analysis_should_run(db: Session, now: Optional[datetime] = None) -> dict:
 
 def request_analysis(db: Session, who: str) -> dict:
     queued = db.execute(select(CashSubmission).where(CashSubmission.status == "queued")).scalars().all()
-    if not queued:
-        return {"requested": False, "queued": 0, "message": "Aucune photo en attente d'analyse."}
+    """Bouton « Analyser maintenant » : lance tout de suite la tâche Claude (relevé Pennylane, photos,
+    contrôles), comme aux créneaux de 12h05 et 18h05."""
     set_setting(db, "analysis_requested_at", datetime.utcnow().isoformat())
     set_setting(db, "analysis_requested_by", who)
-    nxt = _paris_now().replace(minute=5, second=0, microsecond=0)
-    if nxt <= _paris_now():
-        nxt += timedelta(hours=1)
-    if nxt.hour < 8:
-        nxt = nxt.replace(hour=8)
-    elif nxt.hour > 21:
-        nxt = (nxt + timedelta(days=1)).replace(hour=8)
-    return {"requested": True, "queued": len(queued), "starts_around": f"{nxt.hour}h{nxt.minute:02d}",
-            "message": f"Analyse demandée pour {len(queued)} envoi(s). Elle démarrera vers {nxt.hour}h{nxt.minute:02d}."}
+    last = get_setting(db, "routine_fired_at")
+    try:
+        recent = bool(last) and datetime.utcnow() - datetime.fromisoformat(last) < timedelta(minutes=3)
+    except ValueError:
+        recent = False
+    if recent:
+        return {"requested": True, "fired": False, "queued": len(queued), "session_url": get_setting(db, "routine_session_url"),
+                "message": "Une analyse vient d'être lancée, elle est en cours."}
+    if not cash_routine.configured():
+        slots = " ou ".join(f"{h}h{m:02d}" for h, m in analysis_times())
+        return {"requested": True, "fired": False, "queued": len(queued),
+                "message": f"Le lancement immédiat n'est pas encore activé : l'analyse se fera au prochain créneau ({slots})."}
+    res = cash_routine.fire("Analyse demandée depuis le tableau de bord.")
+    if not res["ok"]:
+        log.error("déclenchement de la tâche refusé : %s", res.get("error"))
+        return {"requested": True, "fired": False, "queued": len(queued),
+                "message": f"Lancement impossible ({res.get('error')}). L'analyse se fera au prochain créneau."}
+    set_setting(db, "routine_fired_at", datetime.utcnow().isoformat())
+    set_setting(db, "routine_session_url", res.get("session_url"))
+    what = f"{len(queued)} envoi(s) en attente, relevé bancaire et contrôles" if queued else "relevé bancaire et contrôles"
+    return {"requested": True, "fired": True, "queued": len(queued), "session_url": res.get("session_url"),
+            "message": f"Analyse lancée ({what}). Les résultats arrivent dans quelques minutes."}
 
 
 def queue_items(db: Session) -> list[dict]:
@@ -1344,6 +1357,8 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
         "analysis_times": [f"{h}h{m:02d}" for h, m in analysis_times()],
         "last_worker_run_at": get_setting(db, "last_worker_run_at"),
         "analysis_requested_at": get_setting(db, "analysis_requested_at"),
+        "routine_fired_at": get_setting(db, "routine_fired_at"),
+        "routine_fire_ready": cash_routine.configured(),
         "queued_total": len(db.execute(select(CashSubmission).where(CashSubmission.status == "queued")).scalars().all()),
     }
     return out
