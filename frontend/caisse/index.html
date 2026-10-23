@@ -115,6 +115,7 @@
       <div class="controls">
         <div class="month"><button class="small" id="m-prev">‹</button><b id="m-label"></b><button class="small" id="m-next">›</button></div>
         <div class="tabs" id="store-tabs"></div>
+        <button id="btn-analyze-now" class="primary" title="Analyser les photos en attente sans attendre le prochain créneau">Analyser maintenant</button>
         <button id="btn-checks" title="Jours non traités, dépôts non crédités, sheets">Lancer les contrôles</button>
         <button id="btn-sheets">Relire les sheets</button>
         <button id="btn-settings">Réglages</button>
@@ -174,6 +175,12 @@
   function monthLabel(m) { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); }
   function shiftMonth(n) { const [y, m] = state.month.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); state.month = d.toISOString().slice(0, 7); load(); }
   $('#m-prev').onclick = () => shiftMonth(-1); $('#m-next').onclick = () => shiftMonth(1);
+  $('#btn-analyze-now').onclick = async () => {
+    $('#btn-analyze-now').disabled = true;
+    try { const r = await api('/cash/analysis/request', { method: 'POST' }); toast(r.message, 6000); await load(); }
+    catch (e) { toast(e.message); }
+    $('#btn-analyze-now').disabled = false;
+  };
   $('#btn-checks').onclick = async () => { $('#btn-checks').disabled = true; try { const r = await api('/cash/checks/run', { method: 'POST' }); toast('Contrôles exécutés' + (r.notified_critical ? ` · ${r.notified_critical} alerte(s) critique(s) envoyée(s)` : '')); await load(); } catch (e) { toast(e.message); } $('#btn-checks').disabled = false; };
   $('#btn-sheets').onclick = async () => { $('#btn-sheets').disabled = true; try { const r = await api('/cash/sheets/sync', { method: 'POST' }); const msgs = Object.entries(r).map(([k, v]) => `${k}: ${v.ok ? (v.tab || 'ok') : (v.reason || v.error)}`); toast(msgs.join(' · '), 6000); await load(); } catch (e) { toast(e.message); } $('#btn-sheets').disabled = false; };
   $('#btn-settings').onclick = openSettings;
@@ -221,6 +228,11 @@
 
     $('#stores').innerHTML = d.stores.map(renderStore).join('');
     $('#stores').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+    const nq = integ.queued_total || 0;
+    const btn = $('#btn-analyze-now');
+    btn.textContent = integ.analysis_requested_at && nq ? `Analyse demandée (${nq})` : `Analyser maintenant${nq ? ' (' + nq + ')' : ''}`;
+    btn.title = integ.analysis_requested_at && nq ? `Demandée le ${FRDT(integ.analysis_requested_at)} : elle démarre au prochain passage horaire (de 8h05 à 21h05).`
+      : (nq ? `${nq} envoi(s) en attente d'analyse` : 'Aucune photo en attente d\'analyse');
     $('#footer').textContent = `Derniers contrôles automatiques : ${d.last_checks_at ? FRDT(d.last_checks_at) : 'jamais'} · Seuil d'alerte : ${EUR(d.rules.ecart_threshold_eur)} · Jour non traité après ${d.rules.missing_days_after} j · Dépôt attendu en banque sous ${d.rules.bank_credit_after_days} j`;
   }
 
