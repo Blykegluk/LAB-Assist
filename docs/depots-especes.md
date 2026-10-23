@@ -9,7 +9,7 @@ Suivi des dépôts d'espèces des magasins (Léon Blum / Ornano) : la responsabl
 | `/depots/` | La responsable (PWA à installer sur l'écran d'accueil du téléphone) | identifiant + code (compte `manager` dans `CASH_USERS`) |
 | `/caisse/` | Le gérant (tableau de bord, alertes, réglages) | identifiant + code (compte `owner` dans `CASH_USERS`) |
 
-Comptes par défaut : gérant `1` / `8626`, responsable `2` / `1234`. Pour un adjoint, ajouter `3:1234:manager:Adjoint` à `CASH_USERS`.
+Le dépôt GitHub est public : aucun code ni secret n'y est écrit. Les comptes sont gardés en base avec des codes hachés, et se définissent par `PUT /cash/admin/users` avec le jeton d'administration (`{"users": "identifiant:code:role:libellé,..."}`). Cinq codes faux de suite bloquent un identifiant pendant un quart d'heure.
 
 ### Parcours de la responsable
 1. Entre son identifiant et son code (une seule fois, le téléphone s'en souvient 90 jours).

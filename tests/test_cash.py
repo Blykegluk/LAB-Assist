@@ -22,6 +22,8 @@ def client(tmp_path_factory):
     os.environ["CASH_ANALYSIS_MODE"] = "immediate"  # les tests du mode différé le changent localement
     os.environ.setdefault("OPENAI_API_KEY", "sk-test-dummy")
     os.environ["CASH_USERS"] = "1:8626:owner:Anthony,2:2468:manager:Responsable"
+    os.environ["CASH_WORKER_TOKEN"] = "test-worker-token"
+    os.environ["CASH_ADMIN_TOKEN"] = "test-admin-token"
     os.environ.pop("SMTP_HOST", None)
     os.environ.pop("GOOGLE_SERVICE_ACCOUNT_JSON", None)
     os.environ.pop("PENNYLANE_API_KEY", None)
@@ -269,9 +271,7 @@ def test_extractor_helpers():
 # ----------------------------------------------------------------------------- analyse différée (tâche Claude planifiée)
 
 def _worker_headers():
-    from backend.cash_auth import worker_token
-
-    return {"Authorization": "Bearer " + worker_token()}
+    return {"Authorization": "Bearer test-worker-token"}
 
 
 def _deferred_upload(client, headers, store_id, names, note=None):
@@ -391,3 +391,88 @@ def test_next_analysis_label(monkeypatch):
     assert next_analysis_label(datetime(2026, 10, 23, 19, 0)) == "demain vers 12h05"
     monkeypatch.setenv("CASH_ANALYSIS_TIMES", "12:30,18:30")
     assert next_analysis_label(datetime(2026, 10, 23, 12, 45)) == "aujourd'hui vers 18h30"
+
+
+# ----------------------------------------------------------------------------- administration à distance (dépôt public)
+
+def test_token_hashes_in_config_never_tokens():
+    import hashlib
+    from backend.cash_auth import _matches_hash
+    from backend.cash_config import cash_config
+
+    cfg = cash_config()
+    assert len(cfg["admin_token_sha256"]) == 64 and len(cfg["worker_token_sha256"]) == 64
+    assert _matches_hash("abc", hashlib.sha256(b"abc").hexdigest()) and not _matches_hash("abd", hashlib.sha256(b"abc").hexdigest())
+    raw = (ROOT / "config.json").read_text(encoding="utf-8")
+    assert "8626" not in raw and "1234" not in raw
+
+
+def test_admin_diag_and_users_in_db(client, monkeypatch):
+    from backend import cash_auth
+
+    a = {"Authorization": "Bearer test-admin-token"}
+    assert client.get("/cash/admin/diag").status_code == 401
+    assert client.get("/cash/admin/diag", headers=_worker_headers()).status_code == 401
+    d = client.get("/cash/admin/diag", headers=a).json()
+    assert d["db"]["ok"] is True and d["env_present"]["CASH_USERS"] is True and "password" not in json.dumps(d).lower()
+
+    # Comptes définis en base, codes hachés
+    monkeypatch.delenv("CASH_USERS")
+    r = client.put("/cash/admin/users", headers=a, json={"users": "1:9999:owner:Anthony,2:5555:manager:Responsable,3:5555:manager:Adjoint"})
+    assert r.status_code == 200, r.text
+    assert [u["id"] for u in r.json()["accounts"]] == ["1", "2", "3"] and r.json()["overridden_by_env"] is False
+    from backend.database import SessionLocal
+    from backend.cash_models import CashSetting
+
+    db = SessionLocal()
+    try:
+        stored = db.get(CashSetting, "users").value
+    finally:
+        db.close()
+    assert "9999" not in stored and "5555" not in stored and "pbkdf2$" in stored
+    cash_auth.clear_cache()
+    assert client.post("/cash/auth", json={"user_id": "3", "code": "5555"}).json()["role"] == "manager"
+    tok = client.post("/cash/auth", json={"user_id": "1", "code": "9999"}).json()["token"]
+    assert client.get("/cash/dashboard", headers={"Authorization": "Bearer " + tok}).status_code == 200
+    assert client.put("/cash/admin/users", headers=a, json={"users": "2:5555:manager"}).status_code == 400  # pas de gérant
+    assert client.put("/cash/admin/users", headers=a, json={"users": "1:9999:chef"}).status_code == 400
+
+
+def test_login_throttle(client):
+    for _ in range(5):
+        assert client.post("/cash/auth", json={"user_id": "77", "code": "0000"}).status_code == 401
+    assert client.post("/cash/auth", json={"user_id": "77", "code": "0000"}).status_code == 429
+
+
+def test_photos_kept_in_database(client, monkeypatch):
+    """Le disque de Render s'efface : la photo doit rester lisible depuis la base."""
+    import pathlib as _p
+
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    m = _login(client, "2468")
+    sid = _deferred_upload(client, m, "leon_blum", ["perdu.jpg"])["submission_id"]
+    item = _queue_item(client, sid)
+    from backend.database import SessionLocal
+    from backend.cash_models import CashDocument
+
+    db = SessionLocal()
+    try:
+        path = db.get(CashDocument, item["documents"][0]["id"]).path
+    finally:
+        db.close()
+    _p.Path(path).unlink()
+    assert client.get(item["documents"][0]["url"], headers=_worker_headers()).content == b"fake-perdu.jpg"
+    o = _login(client, "owner-secret")
+    client.post(f"/cash/submissions/{sid}/cancel", headers=o)
+
+
+def test_supabase_direct_url_gets_pooler_candidates(monkeypatch):
+    from sqlalchemy.engine import make_url
+    from backend.database import _supabase_pooler_candidates
+
+    monkeypatch.setenv("SUPABASE_REGION", "eu-west-1")
+    url = make_url("postgresql+psycopg://postgres:secret@db.frnmfmwmgzgbupqaxhgo.supabase.co:5432/postgres")
+    cands = _supabase_pooler_candidates(url)
+    assert cands[0].host == "aws-0-eu-west-1.pooler.supabase.com" and cands[1].host == "aws-1-eu-west-1.pooler.supabase.com"
+    assert cands[0].username == "postgres.frnmfmwmgzgbupqaxhgo" and cands[0].password == "secret" and cands[0].port == 5432
+    assert _supabase_pooler_candidates(make_url("postgresql+psycopg://u:p@my-db.example.com/x")) == []

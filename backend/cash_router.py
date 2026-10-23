@@ -16,11 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import cash_service as svc
-from .cash_auth import User, authenticate, make_token, require_any, require_owner, require_worker
+from .cash_auth import User, authenticate, make_token, require_admin, require_any, require_owner, require_worker
 from .cash_extract import PROMPT_PATH
 from .cash_config import docs_dir, store_by_id, stores as config_stores
 from .cash_extract import get_extractor
-from .cash_models import CashAlert, CashDocument, CashSubmission
+from .cash_models import CashAlert, CashDocument, CashDocumentBlob, CashSubmission
 from .database import get_db
 
 log = logging.getLogger("cash.router")
@@ -123,6 +123,7 @@ async def create_submission(
                                path=str(path), remote_path=remote_path, mime=mime)
             db.add(doc)
             db.flush()
+            db.add(CashDocumentBlob(document_id=doc.id, data=content))
             extracted_pairs.append((doc.id, {}))
             continue
         try:
@@ -137,6 +138,7 @@ async def create_submission(
         )
         db.add(doc)
         db.flush()
+        db.add(CashDocumentBlob(document_id=doc.id, data=content))
         extracted_pairs.append((doc.id, extracted))
     if not extracted_pairs:
         db.delete(sub)
@@ -221,6 +223,9 @@ def _serve_document(db: Session, document_id: int):
         raise HTTPException(status_code=404, detail="Document introuvable")
     if pathlib.Path(doc.path).exists():
         return FileResponse(doc.path, media_type=doc.mime, filename=doc.filename)
+    blob = db.get(CashDocumentBlob, document_id)
+    if blob is not None:
+        return Response(content=blob.data, media_type=doc.mime, headers={"Content-Disposition": f'inline; filename="{doc.filename}"'})
     storage = _storage()
     if doc.remote_path and storage is not None:
         try:
@@ -288,6 +293,53 @@ def worker_result(submission_id: int, payload: WorkerResultIn, who: str = Depend
     return {"submission_id": s["id"], "store": s["store_label"], "period": s["period"], "expected_amount": s["expected_amount"],
             "deposit_amount": s["deposit_amount"], "ecart": s["ecart"], "alerts": [a["title"] for a in out["alerts"]],
             "incomplete": out.get("incomplete") or []}
+
+
+@router.get("/admin/diag")
+def admin_diag(who: str = Depends(require_admin), db: Session = Depends(get_db)):
+    """État technique sans aucun secret : base, variables présentes, comptes, file d'analyse."""
+    import os
+
+    from .cash_auth import users
+    from .database import DB_DIAG, DATABASE_URL
+
+    db_ok, db_error = True, None
+    try:
+        db.execute(select(CashSubmission).limit(1)).first()
+    except Exception as e:  # noqa: BLE001
+        db_ok, db_error = False, str(e).splitlines()[0][:300]
+    names = ["DATABASE_URL", "CASH_USERS", "CASH_SECRET", "CASH_ANALYSIS_MODE", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+             "SUPABASE_URL", "SUPABASE_SERVICE_ROLE", "SUPABASE_BUCKET", "SMTP_HOST", "CASH_ALERT_EMAIL_TO",
+             "GOOGLE_SERVICE_ACCOUNT_JSON", "PENNYLANE_API_KEY_AEJB", "PENNYLANE_API_KEY_JAB", "CASH_PUBLIC_URL", "RENDER_GIT_COMMIT"]
+    try:
+        accounts = [{"id": u.id, "role": u.role, "label": u.label} for u in users().values()]
+    except Exception as e:  # noqa: BLE001
+        accounts = [{"error": str(e)[:200]}]
+    return {
+        "db": {**DB_DIAG, "dialect": DATABASE_URL.split(":", 1)[0], "ok": db_ok, "error": db_error},
+        "env_present": {n: bool(os.getenv(n)) for n in names},
+        "commit": (os.getenv("RENDER_GIT_COMMIT") or "")[:12] or None,
+        "accounts": accounts,
+        "analysis_mode": svc.analysis_mode(),
+    }
+
+
+class AdminUsersIn(BaseModel):
+    users: str  # identifiant:code:role[:libellé],...
+
+
+@router.put("/admin/users")
+def admin_users(payload: AdminUsersIn, who: str = Depends(require_admin)):
+    """Définit les comptes en base (codes hachés). Sans effet si CASH_USERS est défini sur le serveur."""
+    from .cash_auth import store_users
+
+    try:
+        stored = store_users(payload.users)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    import os
+
+    return {"accounts": stored, "overridden_by_env": bool(os.getenv("CASH_USERS"))}
 
 
 @router.post("/worker/checks")

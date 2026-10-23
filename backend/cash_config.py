@@ -53,6 +53,9 @@ def cash_config() -> dict:
         "stores": stores,
         "rules": rules,
         "docs_dir": str(BASE_DIR / (raw.get("docs_dir") or "data/cash_docs")),
+        # Empreintes SHA-256 des jetons techniques (jamais les jetons eux-mêmes : le dépôt est public)
+        "admin_token_sha256": raw.get("admin_token_sha256"),
+        "worker_token_sha256": raw.get("worker_token_sha256"),
     }
 
 

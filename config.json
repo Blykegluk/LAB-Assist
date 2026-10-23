@@ -51,6 +51,8 @@
       "closed_weekdays": [],
       "holidays": []
     },
-    "docs_dir": "data/cash_docs"
+    "docs_dir": "data/cash_docs",
+    "admin_token_sha256": "930f3f6141bb3c046ac9ae54f34a67a79d054aba6afdfd0562fd728831fb2ac3",
+    "worker_token_sha256": "106030483ad58f7e39af89602d2561c0378768c68c25ff4379957f16a400b969"
   }
 }
