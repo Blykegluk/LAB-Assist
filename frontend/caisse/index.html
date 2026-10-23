@@ -115,9 +115,7 @@
       <div class="controls">
         <div class="month"><button class="small" id="m-prev">‹</button><b id="m-label"></b><button class="small" id="m-next">›</button></div>
         <div class="tabs" id="store-tabs"></div>
-        <button id="btn-analyze-now" class="primary" title="Analyser les photos en attente sans attendre le prochain créneau">Analyser maintenant</button>
-        <button id="btn-checks" title="Jours non traités, dépôts non crédités, sheets">Lancer les contrôles</button>
-        <button id="btn-sheets">Relire les sheets</button>
+        <button id="btn-analyze-now" class="primary" title="Photos en attente, relevé bancaire, sheets et contrôles, sans attendre 12h05 ou 18h05">Analyser maintenant</button>
         <button id="btn-settings">Réglages</button>
         <a class="btn" href="/depots/" target="_blank" rel="noopener">App responsable ↗</a>
         <button id="btn-logout" class="small">Déconnexion</button>
@@ -181,8 +179,6 @@
     catch (e) { toast(e.message); }
     $('#btn-analyze-now').disabled = false;
   };
-  $('#btn-checks').onclick = async () => { $('#btn-checks').disabled = true; try { const r = await api('/cash/checks/run', { method: 'POST' }); toast('Contrôles exécutés' + (r.notified_critical ? ` · ${r.notified_critical} alerte(s) critique(s) envoyée(s)` : '')); await load(); } catch (e) { toast(e.message); } $('#btn-checks').disabled = false; };
-  $('#btn-sheets').onclick = async () => { $('#btn-sheets').disabled = true; try { const r = await api('/cash/sheets/sync', { method: 'POST' }); const msgs = Object.entries(r).map(([k, v]) => `${k}: ${v.ok ? (v.tab || 'ok') : (v.reason || v.error)}`); toast(msgs.join(' · '), 6000); await load(); } catch (e) { toast(e.message); } $('#btn-sheets').disabled = false; };
   $('#btn-settings').onclick = openSettings;
 
   async function load() {
@@ -230,10 +226,11 @@
     $('#stores').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
     const nq = integ.queued_total || 0;
     const btn = $('#btn-analyze-now');
-    btn.textContent = integ.analysis_requested_at && nq ? `Analyse demandée (${nq})` : `Analyser maintenant${nq ? ' (' + nq + ')' : ''}`;
-    btn.title = integ.analysis_requested_at && nq ? `Demandée le ${FRDT(integ.analysis_requested_at)} : elle démarre au prochain passage horaire (de 8h05 à 21h05).`
-      : (nq ? `${nq} envoi(s) en attente d'analyse` : 'Aucune photo en attente d\'analyse');
-    $('#footer').textContent = `Derniers contrôles automatiques : ${d.last_checks_at ? FRDT(d.last_checks_at) : 'jamais'} · Seuil d'alerte : ${EUR(d.rules.ecart_threshold_eur)} · Jour non traité après ${d.rules.missing_days_after} j · Dépôt attendu en banque sous ${d.rules.bank_credit_after_days} j`;
+    const running = integ.routine_fired_at && (!integ.last_worker_run_at || integ.last_worker_run_at < integ.routine_fired_at);
+    btn.textContent = running ? 'Analyse en cours…' : `Analyser maintenant${nq ? ' (' + nq + ' en attente)' : ''}`;
+    btn.title = running ? `Lancée le ${FRDT(integ.routine_fired_at)}. Rafraîchis la page dans quelques minutes.`
+      : 'Photos en attente, relevé bancaire, sheets et contrôles, sans attendre 12h05 ou 18h05';
+    $('#footer').textContent = `Dernière analyse : ${d.last_checks_at ? FRDT(d.last_checks_at) : 'jamais'} · Analyses automatiques à ${(integ.analysis_times || []).join(' et ')} · Seuil d'alerte : ${EUR(d.rules.ecart_threshold_eur)} · Jour non traité après ${d.rules.missing_days_after} j · Dépôt attendu en banque sous ${d.rules.bank_credit_after_days} j`;
   }
 
   function groupAlerts(list) {

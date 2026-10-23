@@ -34,7 +34,9 @@ def _loop() -> None:
 
 def start() -> None:
     global _started
-    if _started or os.getenv("CASH_SCHEDULER", "1") in ("0", "false", "no"):
+    # Désactivé par défaut : les contrôles se font aux créneaux de la tâche Claude (12h05, 18h05)
+    # et à la demande (« Analyser maintenant »). CASH_SCHEDULER=1 réactive le contrôle toutes les 15 min.
+    if _started or os.getenv("CASH_SCHEDULER", "0") in ("0", "false", "no"):
         return
     _started = True
     t = threading.Thread(target=_loop, name="cash-checks", daemon=True)

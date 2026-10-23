@@ -59,7 +59,7 @@ Clé API par société dans `PENNYLANE_API_KEY_AEJB` / `PENNYLANE_API_KEY_JAB` (
 3. renvoie ses lectures (`POST /cash/worker/submissions/{id}/extractions`) : le site calcule l'écart, enregistre l'envoi et déclenche les alertes et e-mails ;
 4. lance les contrôles (`POST /cash/worker/checks`), ce qui réveille aussi le service Render.
 
-La tâche passe en réalité toutes les heures de 8h05 à 21h05 et demande d'abord `GET /cash/worker/should-run`. Elle ne travaille que s'il y a des photos en attente et que c'est l'heure d'un créneau prévu, ou que le gérant a cliqué « Analyser maintenant » dans le tableau de bord (`POST /cash/analysis/request`). Sinon elle s'arrête aussitôt.
+Tout se fait à ces deux créneaux ou à la demande : relevé bancaire Pennylane, photos, Google Sheets, contrôles et e-mails. Le bouton « Analyser maintenant » du tableau de bord (`POST /cash/analysis/request`) lance la tâche tout de suite grâce à son déclencheur API. L'adresse et le jeton de ce déclencheur se créent dans claude.ai/code/routines, puis s'enregistrent scellés en base avec `PUT /cash/admin/routine`. Le contrôle automatique toutes les 15 minutes est désactivé par défaut (`CASH_SCHEDULER=1` pour le réactiver).
 
 La tâche s'authentifie avec un jeton propre, dérivé de `CASH_SECRET` (ou `CASH_WORKER_TOKEN`), qui ne donne accès qu'à la file d'analyse. Un document d'un autre magasin ou une lecture incomplète n'empêchent pas l'enregistrement : ils créent une alerte pour le gérant, qui peut annuler l'envoi depuis le tableau de bord. Si des photos attendent plus de 14 heures, une alerte « Photos en attente d'analyse » signale que la tâche ne tourne plus.
 
