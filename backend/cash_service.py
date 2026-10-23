@@ -17,6 +17,7 @@ from . import cash_bank, cash_notify
 from .cash_config import rules as config_rules, stores as config_stores, store_by_id
 from .cash_models import (
     CashAlert,
+    CashBankTransaction,
     CashDeposit,
     CashDocument,
     CashExpense,
@@ -916,22 +917,105 @@ def check_undeposited(db: Session, store_id: str, r: dict) -> dict:
     return {"undeposited": count}
 
 
+BAG_RE = re.compile(r"\bESP\s+(\d{10})\b")
+CASH_DEPOSIT_RE = re.compile(r"\b(DPT|DEPOT|VERST|VERSEMENT)\b.*\bESP", re.I)
+
+
+def store_for_entity(entity: Optional[str]) -> Optional[dict]:
+    for s in config_stores():
+        if (s.get("entity") or "").upper() == (entity or "").upper():
+            return s
+    return None
+
+
+def import_bank_transactions(db: Session, entity: str, transactions: list[dict], source: str = "pennylane") -> dict:
+    """Enregistre les dépôts d'espèces d'un relevé bancaire (les autres lignes sont ignorées)."""
+    store = store_for_entity(entity)
+    if not store:
+        raise ValueError(f"Société inconnue : {entity}")
+    added = updated = ignored = 0
+    for t in transactions or []:
+        label = str(t.get("label") or t.get("description") or "")
+        amount = to_float(t.get("amount"))
+        tdate = parse_date_any(t.get("date"))
+        tid = str(t.get("id") or "").strip()
+        if not tid or amount is None or amount <= 0 or not tdate or not CASH_DEPOSIT_RE.search(label):
+            ignored += 1
+            continue
+        m = BAG_RE.search(label)
+        row = db.get(CashBankTransaction, tid)
+        if row:
+            row.amount, row.tx_date, row.label = amount, tdate, label
+            row.bag_number = m.group(1) if m else row.bag_number
+            updated += 1
+        else:
+            db.add(CashBankTransaction(id=tid, entity=entity.upper(), store_id=store["id"], tx_date=tdate, amount=amount,
+                                       label=label, bag_number=m.group(1) if m else None, source=source))
+            added += 1
+    db.commit()
+    set_setting(db, f"bank_import_at:{store['id']}", datetime.utcnow().isoformat())
+    return {"store_id": store["id"], "added": added, "updated": updated, "ignored": ignored}
+
+
+def _stored_bank_transactions(db: Session, store_id: str, since: date) -> list[dict]:
+    rows = db.execute(select(CashBankTransaction).where(CashBankTransaction.store_id == store_id, CashBankTransaction.tx_date >= since)).scalars().all()
+    return [{"id": r.id, "date": r.tx_date.isoformat(), "amount": r.amount, "label": r.label} for r in rows]
+
+
+def bank_import_recent(db: Session, store_id: str, max_days: int = 3) -> bool:
+    last = get_setting(db, f"bank_import_at:{store_id}")
+    try:
+        return bool(last) and datetime.utcnow() - datetime.fromisoformat(last) < timedelta(days=max_days)
+    except ValueError:
+        return False
+
+
+def check_bank_without_documents(db: Session, store: dict, r: dict) -> dict:
+    """Dépôts vus en banque sans bordereau envoyé sur le site (à partir du premier envoi du magasin)."""
+    first_sub = db.execute(select(CashSubmission).where(CashSubmission.store_id == store["id"]).order_by(CashSubmission.created_at)).scalars().first()
+    if not first_sub:
+        return {"checked": 0}
+    since = first_sub.created_at.date()
+    grace = date.today() - timedelta(days=2)
+    deposits = db.execute(select(CashDeposit).join(CashSubmission, CashSubmission.id == CashDeposit.submission_id)
+                          .where(CashDeposit.store_id == store["id"], CashSubmission.status == "confirmed")).scalars().all()
+    txs = db.execute(select(CashBankTransaction).where(CashBankTransaction.store_id == store["id"], CashBankTransaction.tx_date >= since)).scalars().all()
+    missing = 0
+    for t in txs:
+        key = f"bank_without_docs:{t.id}"
+        found = any((t.bag_number and d.bag_number == t.bag_number) or
+                    (abs(d.amount - t.amount) < 0.01 and abs((d.deposit_date - t.tx_date).days) <= 6) for d in deposits)
+        if found or t.tx_date > grace:
+            resolve_alert(db, key)
+            continue
+        missing += 1
+        upsert_alert(db, store["id"], "bank_without_docs", "warning", f"Dépôt de {eur(t.amount)} en banque sans justificatif",
+                     f"{store['label']} : un dépôt d'espèces de {eur(t.amount)} est arrivé sur le compte {store.get('entity')} le {fr(t.tx_date)}"
+                     f"{' (sac ' + t.bag_number + ')' if t.bag_number else ''}, mais aucun bordereau ni relevé correspondant n'a été envoyé sur le site.",
+                     key, ref_date=t.tx_date)
+    db.commit()
+    return {"checked": len(txs), "without_docs": missing}
+
+
 def check_bank(db: Session, store: dict, r: dict) -> dict:
     entity = store.get("entity")
-    pending = db.execute(select(CashDeposit).where(CashDeposit.store_id == store["id"], CashDeposit.bank_status.in_(("pending", "missing")))).scalars().all()
+    pending = db.execute(select(CashDeposit).where(CashDeposit.store_id == store["id"], CashDeposit.bank_status.in_(("pending", "missing", "unchecked")))).scalars().all()
     if not pending:
         return {"checked": 0}
-    if not cash_bank.configured(entity):
+    since = min(d.deposit_date for d in pending) - timedelta(days=3)
+    if cash_bank.configured(entity):
+        try:
+            txs = cash_bank.list_incoming_transactions(entity, since)
+        except Exception as e:
+            log.error("Pennylane %s: %s", entity, e)
+            return {"checked": 0, "error": str(e)}
+    elif bank_import_recent(db, store["id"], max_days=7):
+        txs = _stored_bank_transactions(db, store["id"], since)  # relevé importé par la synchronisation Pennylane
+    else:
         for d in pending:
             d.bank_status = "unchecked"
         db.commit()
-        return {"checked": 0, "reason": "Pennylane non configuré"}
-    since = min(d.deposit_date for d in pending) - timedelta(days=3)
-    try:
-        txs = cash_bank.list_incoming_transactions(entity, since)
-    except Exception as e:
-        log.error("Pennylane %s: %s", entity, e)
-        return {"checked": 0, "error": str(e)}
+        return {"checked": 0, "reason": "relevé bancaire non disponible"}
     today = date.today()
     limit = today - timedelta(days=int(r.get("bank_credit_after_days") or 4))
     matched = missing = 0
@@ -1043,6 +1127,7 @@ def run_checks(db: Session, force_sheets: bool = False) -> dict:
             "missing_days": check_missing_days(db, sid, r),
             "undeposited": check_undeposited(db, sid, r),
             "bank": check_bank(db, store, r),
+            "bank_without_docs": check_bank_without_documents(db, store, r),
             "sheet": sync_sheet(db, store, force=force_sheets, r=r),
         }
         res["sheet_consistency"] = check_sheet_consistency(db, store, r)
@@ -1057,6 +1142,14 @@ def run_checks(db: Session, force_sheets: bool = False) -> dict:
 
 
 # ----------------------------------------------------------------------------- synthèse (dashboard)
+
+def _bank_row(t: CashBankTransaction, deposits: list[CashDeposit]) -> dict:
+    match = next((d for d in deposits if (t.bag_number and d.bag_number == t.bag_number) or d.bank_transaction_id == t.id), None)
+    if match is None:
+        match = next((d for d in deposits if abs(d.amount - t.amount) < 0.01 and abs((d.deposit_date - t.tx_date).days) <= 6), None)
+    return {"id": t.id, "date": iso(t.tx_date), "amount": t.amount, "bag_number": t.bag_number,
+            "submission_id": match.submission_id if match else None, "site_amount": match.amount if match else None}
+
 
 def month_bounds(month: str) -> tuple[date, date]:
     y, m = int(month[:4]), int(month[5:7])
@@ -1093,6 +1186,10 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
         alert_days = {a.ref_date for a in alerts if a.ref_date}
         alert_subs = {a.submission_id for a in alerts if a.submission_id}
         first_covered = min(covered) if covered else None
+        first_sub = db.execute(select(CashSubmission).where(CashSubmission.store_id == sid).order_by(CashSubmission.created_at)).scalars().first()
+        go_live = first_sub.created_at.date() if first_sub and first_sub.created_at else None
+        # Avant le premier envoi sur le site, les journées ne sont ni « traitées » ni « en retard »
+        baseline = min([x for x in (first_covered, go_live) if x], default=None)
         calendar = []
         for d in daterange(start, end):
             if d > today:
@@ -1101,7 +1198,7 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                 status = "closed"
             elif d in covered:
                 status = "alert" if (d in alert_days or any(s in alert_subs for s in covered[d])) else "ok"
-            elif first_covered and d < first_covered:
+            elif baseline is None or d < baseline:
                 status = "before"
             elif d > today - timedelta(days=int(r.get("missing_days_after") or 5)):
                 status = "pending"
@@ -1109,6 +1206,8 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                 status = "missing"
             calendar.append({"date": d.isoformat(), "status": status, "submissions": covered.get(d, [])})
 
+        m_bank = db.execute(select(CashBankTransaction).where(CashBankTransaction.store_id == sid, CashBankTransaction.tx_date >= start,
+                                                              CashBankTransaction.tx_date <= end)).scalars().all()
         m_reports = [rp for rp in reports if start <= rp.period_end <= end]
         m_deposits = [d for d in deposits if start <= d.deposit_date <= end]
         m_expenses = [e for e in expenses if e.expense_date and start <= e.expense_date <= end]
@@ -1169,7 +1268,12 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                 "bank_missing": len([d for d in m_deposits if d.bank_status == "missing"]),
                 "bank_unchecked": len([d for d in m_deposits if d.bank_status in ("pending", "unchecked")]),
                 "queued": len(queued),
+                "bank_cash_total": r2(sum(t.amount for t in m_bank)),
+                "bank_cash_count": len(m_bank),
             },
+            "bank_deposits": [_bank_row(t, deposits) for t in sorted(m_bank, key=lambda x: x.tx_date, reverse=True)],
+            "bank_import_at": get_setting(db, f"bank_import_at:{sid}"),
+            "go_live": iso(go_live),
             "queued": [{"id": q.id, "created_at": q.created_at.isoformat() if q.created_at else None, "submitted_by": q.submitted_by, "note": q.note,
                         "documents_count": len(db.execute(select(CashDocument).where(CashDocument.submission_id == q.id)).scalars().all())}
                        for q in queued],
@@ -1190,7 +1294,8 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
     out["integrations"] = {
         "email": cash_notify.configured(),
         "sheets": SheetsClient.configured(),
-        "pennylane": {s["id"]: cash_bank.configured(s.get("entity")) for s in config_stores()},
+        "pennylane": {s["id"]: cash_bank.configured(s.get("entity")) or bank_import_recent(db, s["id"]) for s in config_stores()},
+        "store_labels": {s["id"]: s["label"] for s in config_stores()},
         "vision_mock": os.getenv("CASH_MOCK_EXTRACTION", "") in ("1", "true", "yes"),
         "vision_provider": (os.getenv("CASH_VISION_PROVIDER") or "anthropic").lower(),
         "vision_key": bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")) if (os.getenv("CASH_VISION_PROVIDER") or "anthropic").lower() == "anthropic" else bool(os.getenv("OPENAI_API_KEY")),
