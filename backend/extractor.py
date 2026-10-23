@@ -14,9 +14,16 @@ class IDCardExtractor:
     def __init__(self, prompt_path: str, model: str = "gpt-4o-mini") -> None:
         with open(prompt_path, "r", encoding="utf-8") as f:
             self.system_prompt = f.read()
-        # Le client lira OPENAI_API_KEY dans les variables d'environnement
-        self.client = OpenAI()
+        # Le client lira OPENAI_API_KEY dans les variables d'environnement.
+        # Création différée : sans clé, l'application démarre quand même (seule l'analyse CNI échoue).
+        self._client = None
         self.model = model
+
+    @property
+    def client(self) -> OpenAI:
+        if self._client is None:
+            self._client = OpenAI()
+        return self._client
 
     @staticmethod
     def _to_data_url(image_bytes: bytes, mime: str) -> str:
