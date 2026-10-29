@@ -47,7 +47,9 @@ Les contrôles tournent toutes les 15 minutes en tâche de fond (`CASH_SCHEDULER
 ## Google Sheets « Comptage coffre »
 Lecture seule de l'onglet de période courant (« Du … au … ») de chaque sheet : liste des dépôts, ajouts de monnaie, factures, écarts par caissier, comptage. Les IDs des sheets sont dans `config.json` (`cash.stores[].sheet_id`).
 
-Mise en place : créer un compte de service Google (Google Cloud → IAM → comptes de service, activer l'API Google Sheets), télécharger sa clé JSON, la mettre dans `GOOGLE_SERVICE_ACCOUNT_JSON`, et **partager les deux sheets en lecteur** avec l'adresse e-mail du compte de service.
+Voie par défaut : la tâche Claude d'analyse (12h05, 18h05, « Analyser maintenant ») lit les deux sheets avec son connecteur Google Sheets et les transmet par `POST /cash/worker/sheet-values` ; la liste des sheets est donnée par `GET /cash/worker/sheets`. Le connecteur Google Sheets doit être ajouté à la tâche (comme Pennylane). Les écarts apparaissent dans le détail de chaque envoi (journées couvertes) et dans l'onglet « Synthèse du mois » (par personne, fautes de frappe des prénoms regroupées ; factures espèces du sheet et des photos, sans double compte).
+
+Variante sans tâche Claude : créer un compte de service Google (Google Cloud → IAM → comptes de service, activer l'API Google Sheets), télécharger sa clé JSON, la mettre dans `GOOGLE_SERVICE_ACCOUNT_JSON`, et **partager les deux sheets en lecteur** avec l'adresse e-mail du compte de service.
 
 ## Pennylane (rapprochement bancaire)
 Clé API par société dans `PENNYLANE_API_KEY_AEJB` / `PENNYLANE_API_KEY_JAB` (Pennylane → Paramètres → API). Chaque dépôt est recherché par numéro de sac dans le libellé bancaire, sinon par montant et date proche.
@@ -90,6 +92,6 @@ python -m pytest tests/test_cash.py
 Les tests utilisent `CASH_MOCK_EXTRACTION=1` : des fichiers JSON remplacent les photos.
 
 ## API (préfixe `/cash`)
-`POST /auth` · `GET /stores` · `POST /submissions` (multipart `store_id` + `files[]`) · `POST /submissions/{id}/confirm` · `POST /submissions/{id}/cancel` · `GET /submissions` · `GET /submissions/{id}` · `GET /documents/{id}` · `GET /manager/recent` · `GET /dashboard?month=AAAA-MM&store_id=` · `GET /alerts` · `POST /alerts/{id}/ack|reopen` · `POST /checks/run` · `POST /sheets/sync` · `POST /digest/send` · `GET|PUT /settings`
+`POST /auth` · `GET /stores` · `POST /submissions` (multipart `store_id` + `files[]`) · `POST /submissions/{id}/confirm` · `POST /submissions/{id}/cancel` · `GET /submissions` · `GET /submissions/{id}` · `GET /documents/{id}` · `GET /manager/recent` · `GET /dashboard?month=AAAA-MM&store_id=` · `GET /alerts` · `POST /alerts/{id}/ack|reopen` · `POST /checks/run` · `POST /sheets/sync` · `POST /digest/send` · `GET|PUT /settings` · `GET /synthesis?month=AAAA-MM&store_id=`
 
 Tâche d'analyse (jeton de la tâche ou gérant) : `GET /worker/queue` · `GET /worker/prompt` · `GET /worker/documents/{id}` · `POST /worker/submissions/{id}/extractions` (`{"documents": [{"document_id": 1, "extraction": {…}}]}`) · `POST /worker/checks`
