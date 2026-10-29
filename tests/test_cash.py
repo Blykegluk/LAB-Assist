@@ -719,6 +719,12 @@ def test_dashboard_balance_ignores_duplicate_releve(client, monkeypatch):
                         json={"documents": [{"document_id": i, "extraction": x} for i, x in zip(ids, docs)]})
         assert r.status_code == 200, r.text
     k = next(s for s in client.get("/cash/dashboard?month=2026-03&store_id=ornano", headers=o).json()["stores"] if s["id"] == "ornano")["kpis"]
-    assert k["cash_collected"] == 2059.27 and len(k["duplicates"]) == 1 and k["balance_submissions"] == 1
+    assert k["cash_collected"] == 2059.27 and len(k["merged"]) == 1 and len(k["merged"][0]) == 2 and k["balance_submissions"] == 1
     assert k["expenses"] == 14.45 and k["to_deposit"] == 2044.82 and k["deposited"] == 2045 and k["pending_deposit"] == 0
     assert round(k["to_deposit"] - k["pending_deposit"] - k["deposited"], 2) == k["ecart_total"] == -0.18
+    # Bordereau renvoyé seul (même sac) : toujours compté une fois
+    sid = _deferred_upload(client, m, "ornano", ["b.jpg"])["submission_id"]
+    i = _queue_item(client, sid)["documents"][0]["id"]
+    client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w, json={"documents": [{"document_id": i, "extraction": dep}]})
+    k = next(s for s in client.get("/cash/dashboard?month=2026-03&store_id=ornano", headers=o).json()["stores"] if s["id"] == "ornano")["kpis"]
+    assert k["deposited"] == 2045 and k["cash_collected"] == 2059.27 and k["ecart_total"] == -0.18 and len(k["merged"][0]) == 3
