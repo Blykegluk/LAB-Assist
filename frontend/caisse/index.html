@@ -210,7 +210,11 @@
     try { d = await api(`/cash/synthesis?month=${state.month}${state.store ? '&store_id=' + state.store : ''}`); } catch (e) { toast(e.message); return; }
     $('#synthesis').innerHTML = d.stores.map(renderSynthesisStore).join('') || '<div class="card"><p class="muted">Aucun magasin.</p></div>';
     $('#synthesis').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
-    $('#synthesis').querySelectorAll('[data-pd]').forEach(r => r.onclick = () => {
+    bindPersonRows($('#synthesis'));
+  }
+
+  function bindPersonRows(root) {
+    root.querySelectorAll('[data-pd]').forEach(r => r.onclick = () => {
       const open = $('#pd-' + r.dataset.pd).classList.toggle('hidden') === false;
       r.classList.toggle('open', open);
     });
@@ -295,6 +299,7 @@
 
     $('#stores').innerHTML = d.stores.map(renderStore).join('');
     $('#stores').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+    bindPersonRows($('#stores'));
     const nq = integ.queued_total || 0;
     const btn = $('#btn-analyze-now');
     const running = integ.routine_fired_at && (!integ.last_worker_run_at || integ.last_worker_run_at < integ.routine_fired_at);
@@ -378,7 +383,9 @@
             <div class="kpi"><div class="l">Factures espèces (onglet)</div><div class="v">${EUR(sheet.totals && sheet.totals.expenses)}</div></div>
             <div class="kpi"><div class="l">Monnaie ajoutée (onglet)</div><div class="v">${EUR(sheet.totals && sheet.totals.coins_added)}</div></div>
           </div>
-          ${Object.keys(sheet.register_diffs_by_person || {}).length ? `<table style="margin-top:10px"><thead><tr><th>Caissier</th><th class="num">Écart cumulé du mois</th></tr></thead><tbody>${Object.entries(sheet.register_diffs_by_person).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v]) => `<tr><td>${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>`).join('')}</tbody></table>` : ''}
+          ${Object.keys(sheet.register_diffs_by_person || {}).length ? `<table style="margin-top:10px"><thead><tr><th>Caissier</th><th class="num">Écart cumulé du mois</th></tr></thead><tbody>${Object.entries(sheet.register_diffs_by_person).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v], i) => `<tr class="clickable" data-pd="sd-${s.id}-${i}" title="Voir le détail"><td style="white-space:nowrap"><span class="chev">▸</span> ${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>
+            <tr class="pdetail hidden" id="pd-sd-${s.id}-${i}"><td colspan="2">${personDetail({ total: v, entries: (sheet.register_diffs_entries || {})[p] || [] })}</td></tr>`).join('')}</tbody></table>
+          <p class="small muted" style="margin-top:6px">Clique sur un caissier pour voir ses écarts jour par jour.</p>` : ''}
           ${sheet.count && sheet.count.ecart != null ? `<p class="small muted" style="margin-top:8px">Écart du dernier comptage coffre dans le sheet : <b>${EUR(sheet.count.ecart)}</b></p>` : ''}
         ` : `<p class="muted">${s.sheet_error ? 'Erreur de lecture : ' + esc(s.sheet_error) : 'Pas encore lu : il le sera à la prochaine analyse (12h05, 18h05 ou « Analyser maintenant »).'}</p>`}
         ${Object.keys(s.operators_diff || {}).length ? `<h2 style="margin-top:14px">Écarts par caissier (rapports Orika du mois)</h2><table><thead><tr><th>Opérateur</th><th class="num">Différence cumulée</th></tr></thead><tbody>${Object.entries(s.operators_diff).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v]) => `<tr><td>${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>`).join('')}</tbody></table>` : ''}
