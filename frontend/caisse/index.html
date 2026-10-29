@@ -213,18 +213,18 @@
   function renderSynthesisStore(s) {
     const inv = s.invoices;
     const head = `<div class="store-head"><span class="dot" style="background:${s.color}"></span><h2>${esc(s.label)}</h2>
-      <span class="meta">${s.sheet_available ? 'sheet lu le ' + FRDT(s.sheet_fetched_at) + ' · onglets : ' + s.sheet_tabs.map(esc).join(', ') : 'sheet pas encore lu : il le sera à la prochaine analyse'}</span></div>`;
+      <span class="meta">${s.sheet_available ? 'sheet lu le ' + FRDT(s.sheet_fetched_at) + ' · onglets : ' + s.sheet_tabs.map(esc).join(', ') + (s.sheet_last_entry ? ' · dernier écart saisi le ' + FRD(s.sheet_last_entry) : '') : 'sheet pas encore lu : il le sera à la prochaine analyse'}</span></div>`;
     const kpis = `<div class="kpis">
       <div class="kpi ${s.register_total < -10 ? 'bad' : s.register_total < 0 ? 'warn' : 'ok'}"><div class="l">Écarts de caisse du mois</div><div class="v">${s.register_total > 0 ? '+' : ''}${EUR(s.register_total)}</div><div class="s">${s.register_lines} saisie(s) · ${s.persons.length} personne(s)</div></div>
-      <div class="kpi"><div class="l">Factures payées en espèces</div><div class="v">${inv.sheet_count + inv.site_count}</div><div class="s">sheet : ${inv.sheet_count} · photos envoyées : ${inv.site_count}</div></div>
-      <div class="kpi"><div class="l">Montant des factures</div><div class="v">${EUR((inv.sheet_total || 0) + (inv.site_total || 0))}</div><div class="s">sheet ${EUR(inv.sheet_total)} · photos ${EUR(inv.site_total)}</div></div>
+      <div class="kpi"><div class="l">Factures payées en espèces</div><div class="v">${inv.count}</div><div class="s">sheet : ${inv.sheet_count} · photos envoyées : ${inv.site_count}${inv.sheet_count + inv.site_count > inv.count ? ' · ' + (inv.sheet_count + inv.site_count - inv.count) + ' en double comptée(s) une fois' : ''}</div></div>
+      <div class="kpi"><div class="l">Montant des factures</div><div class="v">${EUR(inv.total)}</div><div class="s">sheet ${EUR(inv.sheet_total)} · photos ${EUR(inv.site_total)}</div></div>
     </div>`;
     const persons = s.persons.length ? `<table><thead><tr><th>Personne</th><th class="num">Jours</th><th class="num">Manques</th><th class="num">Excédents</th><th class="num">Écart net</th><th class="num">Plus gros écart</th></tr></thead><tbody>
       ${s.persons.map(p => `<tr><td>${esc(p.person)}</td><td class="num">${p.days}</td><td class="num">${EUR(p.shortfall)}</td><td class="num">${p.surplus ? '+' + EUR(p.surplus) : EUR(0)}</td><td class="num"><span class="pill ${p.total <= -10 ? 'bad' : p.total < -2 ? 'warn' : 'ok'}">${p.total > 0 ? '+' : ''}${EUR(p.total)}</span></td><td class="num">${p.worst > 0 ? '+' : ''}${EUR(p.worst)}</td></tr>`).join('')}
     </tbody></table>` : `<p class="muted">${s.sheet_available ? 'Aucun écart de caisse saisi ce mois dans le sheet.' : 'Pas encore de données du sheet.'}</p>`;
-    const items = [...inv.sheet_items.map(x => ({ ...x, src: 'sheet' })), ...inv.site_items.map(x => ({ ...x, src: 'photo' }))].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const items = inv.items || [];
     const invoices = items.length ? `<table><thead><tr><th>Date</th><th>Source</th><th>Libellé</th><th class="num">Montant</th></tr></thead><tbody>
-      ${items.map(x => `<tr ${x.submission_id ? `class="clickable" data-sub="${x.submission_id}"` : ''}><td>${FRD(x.date)}</td><td class="small">${x.src === 'sheet' ? 'sheet' : 'photo envoyée'}</td><td class="small">${esc(x.label || '')}</td><td class="num">${EUR(x.amount)}</td></tr>`).join('')}
+      ${items.map(x => `<tr ${x.submission_id ? `class="clickable" data-sub="${x.submission_id}"` : ''}><td>${FRD(x.date)}</td><td class="small">${x.sources.map(src => src === 'sheet' ? 'sheet' : 'photo envoyée').join(' + ')}</td><td class="small">${esc(x.label || '')}</td><td class="num">${EUR(x.amount)}</td></tr>`).join('')}
     </tbody></table>` : '<p class="muted">Aucune facture payée en espèces ce mois.</p>';
     return `${head}${kpis}<div class="grid" style="margin-top:14px">
       <div class="card"><h2>Écarts de caisse par personne</h2><p class="small muted" style="margin-top:-4px">Saisis dans le sheet « Comptage coffre ». Négatif : il manquait de l'argent.</p>${persons}</div>

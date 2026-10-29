@@ -681,7 +681,7 @@ def test_sheet_values_detail_and_synthesis(client, monkeypatch):
     ex = dict(RELEVE_LB_1920, period_start=day1.strftime("%d/%m/%Y"), period_end=day2.strftime("%d/%m/%Y"), cash_amount=2150.87)
     client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w, json={"documents": [{"document_id": doc, "extraction": ex}]})
     s = client.get(f"/cash/submissions/{sid}", headers=o).json()["sheet"]
-    assert s["available"] is True and [e["person"] for e in s["register_diffs"]] == ["cedric", "clarisse", "Clarisse"]
+    assert s["available"] is True and [e["person"] for e in s["register_diffs"]] == ["Cedric", "Clarisse", "Clarisse"]
     assert s["total"] == -8.54 and s["expenses_total"] == 24.32
 
     syn = client.get(f"/cash/synthesis?month={day1.strftime('%Y-%m')}&store_id=leon_blum", headers=o).json()["stores"][0]
@@ -689,4 +689,14 @@ def test_sheet_values_detail_and_synthesis(client, monkeypatch):
     assert cl["days"] == (1 if day1 == day2 else 2) and cl["total"] == -5.45 and cl["shortfall"] == -5.85 and cl["surplus"] == 0.4
     if day1.month == day2.month:
         assert syn["invoices"]["sheet_count"] == 2 and syn["invoices"]["sheet_total"] == 24.32
+        assert syn["invoices"]["count"] == 2 and syn["invoices"]["total"] == 24.32
     assert client.get("/cash/synthesis", headers=m).status_code == 403
+
+
+def test_person_aliases_merge_typos():
+    from backend.cash_service import person_aliases
+    names = ["camille"] * 3 + ["camile", "cam", "mohammed", "mohammed", "mohamed", "rony", "rony", "RONY", "tony",
+                                "interim", "interim", "interim3", "interiml", "yvenson", "yvenson", "yvenso,"]
+    a = person_aliases(names)
+    assert a["camile"] == a["cam"] == "camille" and a["mohamed"] == "mohammed" and a["interiml"] == "interim"
+    assert a["yvenso"] == "yvenson" and a["tony"] == "tony" and a["interim3"] == "interim3" and a["rony"] == "rony"

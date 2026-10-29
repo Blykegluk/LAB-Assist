@@ -1130,6 +1130,40 @@ def store_sheet_values(db: Session, store_id: str, tab_title: str, values: list[
             "expenses": len(data["expenses"]), "deposits": len(data["deposits"])}
 
 
+def _edit1(a: str, b: str) -> bool:
+    """Au plus une lettre ajoutée, retirée ou changée."""
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) <= 1
+    if len(a) > len(b):
+        a, b = b, a
+    return any(a == b[:i] + b[i + 1:] for i in range(len(b)))
+
+
+def person_aliases(names: list[str]) -> dict[str, str]:
+    """Regroupe les fautes de frappe des prénoms saisis à la main (« camile », « cam » → « camille »)."""
+    counts: dict[str, int] = {}
+    for n in names:
+        k = (n or "").strip().lower().rstrip(",.;")
+        if k:
+            counts[k] = counts.get(k, 0) + 1
+    alias: dict[str, str] = {}
+    for k in sorted(counts, key=lambda x: counts[x]):
+        if any(ch.isdigit() for ch in k):
+            continue
+        cands = [o for o in counts if o != k and counts[o] > counts[k] and not any(ch.isdigit() for ch in o)
+                 and ((len(k) >= 5 and _edit1(k, o)) or (len(k) >= 3 and o.startswith(k)))]
+        if cands:
+            alias[k] = max(cands, key=lambda o: counts[o])
+    for k in list(alias):  # résout les chaînes a → b → c
+        seen = {k}
+        while alias[k] in alias and alias[k] not in seen:
+            seen.add(alias[k])
+            alias[k] = alias[alias[k]]
+    return {k: alias.get(k, k) for k in counts}
+
+
 def sheet_entries(db: Session, store_id: str) -> dict:
     """Écarts de caisse, factures et dépôts du sheet, tous onglets reçus confondus (dernière lecture de chaque onglet)."""
     snaps = db.execute(select(CashSheetSnapshot).where(CashSheetSnapshot.store_id == store_id, CashSheetSnapshot.ok.is_(True))
@@ -1146,6 +1180,14 @@ def sheet_entries(db: Session, store_id: str) -> dict:
         for key in ("register_diffs", "expenses", "deposits"):
             for e in data.get(key) or []:
                 out[key].append(dict(e, tab=s.tab_title))
+    aliases = person_aliases([e.get("person") or "" for e in out["register_diffs"]])
+    for e in out["register_diffs"]:
+        raw = (e.get("person") or "").strip()
+        key = raw.lower().rstrip(",.;")
+        e["person_raw"] = raw
+        e["person"] = aliases.get(key, key).capitalize() if key else "?"
+    dated = [parse_date_any(e.get("date")) for e in out["register_diffs"]]
+    out["last_entry"] = iso(max((d for d in dated if d), default=None))
     return out
 
 
@@ -1201,13 +1243,27 @@ def synthesis(db: Session, month: str, store_id: Optional[str] = None) -> dict:
         site_exp = db.execute(select(CashExpense).join(CashSubmission, CashSubmission.id == CashExpense.submission_id)
                               .where(CashExpense.store_id == store["id"], CashSubmission.status == "confirmed")).scalars().all()
         site_exp = [e for e in site_exp if e.expense_date and start <= e.expense_date <= end]
+        # Une même facture saisie dans le sheet et envoyée en photo ne compte qu'une fois.
+        merged = [{"date": iso(e.expense_date), "amount": e.amount, "label": e.label, "submission_id": e.submission_id, "sources": ["photo"]}
+                  for e in site_exp]
+        for e in sheet_exp:
+            d = parse_date_any(e["date"])
+            twin = next((m for m in merged if "sheet" not in m["sources"] and abs(m["amount"] - e["amount"]) < 0.01
+                         and abs((parse_date_any(m["date"]) - d).days) <= 3), None) if d else None
+            if twin:
+                twin["sources"].append("sheet")
+            else:
+                merged.append({"date": e["date"], "amount": e["amount"], "label": None, "submission_id": None, "sources": ["sheet"]})
+        merged.sort(key=lambda x: x["date"] or "")
         stores_out.append({
             "id": store["id"], "label": store["label"], "color": store.get("color"),
             "sheet_available": bool(entries["tabs"]), "sheet_fetched_at": entries["fetched_at"], "sheet_tabs": entries["tabs"],
+            "sheet_last_entry": entries["last_entry"],
             "persons": persons,
             "register_total": r2(sum(e["amount"] for e in diffs)) if diffs else 0.0,
             "register_lines": len(diffs),
             "invoices": {
+                "count": len(merged), "total": r2(sum(m["amount"] for m in merged)), "items": merged,
                 "sheet_count": len(sheet_exp), "sheet_total": r2(sum(e["amount"] for e in sheet_exp)),
                 "sheet_items": sorted(({"date": e["date"], "amount": e["amount"]} for e in sheet_exp), key=lambda x: x["date"]),
                 "site_count": len(site_exp), "site_total": r2(sum(e.amount for e in site_exp)),
@@ -1390,8 +1446,10 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
             diffs = data.get("register_diffs") or []
             m_diffs = [x for x in diffs if x.get("date") and start <= parse_date_any(x["date"]) <= end]
             by_person: dict[str, float] = {}
+            aliases = person_aliases([x.get("person") or "" for x in diffs])  # « clarisse » = « Clarisse », « camile » = « camille »
             for x in m_diffs:
-                name = (x.get("person") or "?").strip().capitalize() or "?"  # « clarisse » = « Clarisse »
+                key = (x.get("person") or "").strip().lower().rstrip(",.;")
+                name = aliases.get(key, key).capitalize() or "?"
                 by_person[name] = round(by_person.get(name, 0.0) + (x.get("amount") or 0), 2)
             sheet = {
                 "fetched_at": snap.fetched_at.isoformat(),
@@ -1450,7 +1508,7 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
     out["last_checks_at"] = get_setting(db, "last_checks_at")
     out["integrations"] = {
         "email": cash_notify.configured(),
-        "sheets": SheetsClient.configured(),
+        "sheets": SheetsClient.configured() or any(latest_snapshot(db, s["id"], ok_only=True) for s in config_stores()),
         "pennylane": {s["id"]: cash_bank.configured(s.get("entity")) or bank_import_recent(db, s["id"]) for s in config_stores()},
         "store_labels": {s["id"]: s["label"] for s in config_stores()},
         "vision_mock": os.getenv("CASH_MOCK_EXTRACTION", "") in ("1", "true", "yes"),
