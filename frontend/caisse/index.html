@@ -114,6 +114,7 @@
       </div>
       <div class="controls">
         <div class="month"><button class="small" id="m-prev">‹</button><b id="m-label"></b><button class="small" id="m-next">›</button></div>
+        <div class="tabs" id="view-tabs"><button data-v="dashboard" class="active">Tableau de bord</button><button data-v="synthesis">Synthèse du mois</button></div>
         <div class="tabs" id="store-tabs"></div>
         <button id="btn-analyze-now" class="primary" title="Photos en attente, relevé bancaire, sheets et contrôles, sans attendre 12h05 ou 18h05">Analyser maintenant</button>
         <button id="btn-settings">Réglages</button>
@@ -121,6 +122,8 @@
         <button id="btn-logout" class="small">Déconnexion</button>
       </div>
     </header>
+
+    <div id="synthesis" class="hidden"></div>
 
     <div class="card" id="alerts-card">
       <h2>À traiter <span class="pill bad" id="alerts-count">0</span></h2>
@@ -139,7 +142,8 @@
 <script>
 (() => {
   const $ = (s, r = document) => r.querySelector(s);
-  const state = { token: localStorage.getItem('cash_owner_token') || '', month: new Date().toISOString().slice(0, 7), store: '', data: null, showAcked: false };
+  const _now = new Date();
+  const state = { token: localStorage.getItem('cash_owner_token') || '', month: `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}`, store: '', data: null, showAcked: false, view: 'dashboard' };
   const EUR = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
   const FRD = (iso) => { if (!iso) return '—'; const [y, m, d] = iso.slice(0, 10).split('-'); return `${d}/${m}/${y}`; };
   const FRDT = (iso) => iso ? new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
@@ -171,7 +175,13 @@
 
   // ----- navigation
   function monthLabel(m) { const [y, mm] = m.split('-'); return new Date(Number(y), Number(mm) - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }); }
-  function shiftMonth(n) { const [y, m] = state.month.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); state.month = d.toISOString().slice(0, 7); load(); }
+  // Calcul en année/mois entiers : passer par toISOString() (UTC) faisait reculer d'un mois en heure de Paris.
+  function shiftMonth(n) {
+    const [y, m] = state.month.split('-').map(Number);
+    const t = y * 12 + (m - 1) + n;
+    state.month = `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`;
+    if (state.view === 'synthesis') loadSynthesis(); else load();
+  }
   $('#m-prev').onclick = () => shiftMonth(-1); $('#m-next').onclick = () => shiftMonth(1);
   $('#btn-analyze-now').onclick = async () => {
     $('#btn-analyze-now').disabled = true;
@@ -180,6 +190,47 @@
     $('#btn-analyze-now').disabled = false;
   };
   $('#btn-settings').onclick = openSettings;
+
+  // ----- vue « Synthèse du mois »
+  function setView(v) {
+    state.view = v;
+    document.querySelectorAll('#view-tabs button').forEach(b => b.classList.toggle('active', b.dataset.v === v));
+    const syn = v === 'synthesis';
+    $('#synthesis').classList.toggle('hidden', !syn);
+    ['#alerts-card', '#stores', '#footer'].forEach(sel => $(sel).classList.toggle('hidden', syn));
+    if (syn) loadSynthesis(); else load();
+  }
+  document.querySelectorAll('#view-tabs button').forEach(b => b.onclick = () => setView(b.dataset.v));
+
+  async function loadSynthesis() {
+    $('#m-label').textContent = monthLabel(state.month);
+    let d;
+    try { d = await api(`/cash/synthesis?month=${state.month}${state.store ? '&store_id=' + state.store : ''}`); } catch (e) { toast(e.message); return; }
+    $('#synthesis').innerHTML = d.stores.map(renderSynthesisStore).join('') || '<div class="card"><p class="muted">Aucun magasin.</p></div>';
+    $('#synthesis').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+  }
+
+  function renderSynthesisStore(s) {
+    const inv = s.invoices;
+    const head = `<div class="store-head"><span class="dot" style="background:${s.color}"></span><h2>${esc(s.label)}</h2>
+      <span class="meta">${s.sheet_available ? 'sheet lu le ' + FRDT(s.sheet_fetched_at) + ' · onglets : ' + s.sheet_tabs.map(esc).join(', ') : 'sheet pas encore lu : il le sera à la prochaine analyse'}</span></div>`;
+    const kpis = `<div class="kpis">
+      <div class="kpi ${s.register_total < -10 ? 'bad' : s.register_total < 0 ? 'warn' : 'ok'}"><div class="l">Écarts de caisse du mois</div><div class="v">${s.register_total > 0 ? '+' : ''}${EUR(s.register_total)}</div><div class="s">${s.register_lines} saisie(s) · ${s.persons.length} personne(s)</div></div>
+      <div class="kpi"><div class="l">Factures payées en espèces</div><div class="v">${inv.sheet_count + inv.site_count}</div><div class="s">sheet : ${inv.sheet_count} · photos envoyées : ${inv.site_count}</div></div>
+      <div class="kpi"><div class="l">Montant des factures</div><div class="v">${EUR((inv.sheet_total || 0) + (inv.site_total || 0))}</div><div class="s">sheet ${EUR(inv.sheet_total)} · photos ${EUR(inv.site_total)}</div></div>
+    </div>`;
+    const persons = s.persons.length ? `<table><thead><tr><th>Personne</th><th class="num">Jours</th><th class="num">Manques</th><th class="num">Excédents</th><th class="num">Écart net</th><th class="num">Plus gros écart</th></tr></thead><tbody>
+      ${s.persons.map(p => `<tr><td>${esc(p.person)}</td><td class="num">${p.days}</td><td class="num">${EUR(p.shortfall)}</td><td class="num">${p.surplus ? '+' + EUR(p.surplus) : EUR(0)}</td><td class="num"><span class="pill ${p.total <= -10 ? 'bad' : p.total < -2 ? 'warn' : 'ok'}">${p.total > 0 ? '+' : ''}${EUR(p.total)}</span></td><td class="num">${p.worst > 0 ? '+' : ''}${EUR(p.worst)}</td></tr>`).join('')}
+    </tbody></table>` : `<p class="muted">${s.sheet_available ? 'Aucun écart de caisse saisi ce mois dans le sheet.' : 'Pas encore de données du sheet.'}</p>`;
+    const items = [...inv.sheet_items.map(x => ({ ...x, src: 'sheet' })), ...inv.site_items.map(x => ({ ...x, src: 'photo' }))].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const invoices = items.length ? `<table><thead><tr><th>Date</th><th>Source</th><th>Libellé</th><th class="num">Montant</th></tr></thead><tbody>
+      ${items.map(x => `<tr ${x.submission_id ? `class="clickable" data-sub="${x.submission_id}"` : ''}><td>${FRD(x.date)}</td><td class="small">${x.src === 'sheet' ? 'sheet' : 'photo envoyée'}</td><td class="small">${esc(x.label || '')}</td><td class="num">${EUR(x.amount)}</td></tr>`).join('')}
+    </tbody></table>` : '<p class="muted">Aucune facture payée en espèces ce mois.</p>';
+    return `${head}${kpis}<div class="grid" style="margin-top:14px">
+      <div class="card"><h2>Écarts de caisse par personne</h2><p class="small muted" style="margin-top:-4px">Saisis dans le sheet « Comptage coffre ». Négatif : il manquait de l'argent.</p>${persons}</div>
+      <div class="card"><h2>Factures payées en espèces</h2>${invoices}</div>
+    </div>`;
+  }
 
   async function load() {
     $('#m-label').textContent = monthLabel(state.month);
@@ -205,7 +256,11 @@
     const allStores = (state.allStores || d.stores);
     if (!state.allStores) state.allStores = d.stores.map(s => ({ id: s.id, label: s.label, color: s.color }));
     tabs.innerHTML = `<button class="${state.store ? '' : 'active'}" data-s="">Tous</button>` + state.allStores.map(s => `<button class="${state.store === s.id ? 'active' : ''}" data-s="${s.id}">${esc(s.label)}</button>`).join('');
-    tabs.querySelectorAll('button').forEach(b => b.onclick = () => { state.store = b.dataset.s; load(); });
+    tabs.querySelectorAll('button').forEach(b => b.onclick = () => {
+      state.store = b.dataset.s;
+      tabs.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+      if (state.view === 'synthesis') loadSynthesis(); else load();
+    });
 
     // alertes globales
     const alerts = d.stores.flatMap(s => s.alerts).filter(a => state.showAcked || a.status === 'open');
@@ -311,7 +366,7 @@
           </div>
           ${Object.keys(sheet.register_diffs_by_person || {}).length ? `<table style="margin-top:10px"><thead><tr><th>Caissier</th><th class="num">Écart cumulé du mois</th></tr></thead><tbody>${Object.entries(sheet.register_diffs_by_person).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v]) => `<tr><td>${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>`).join('')}</tbody></table>` : ''}
           ${sheet.count && sheet.count.ecart != null ? `<p class="small muted" style="margin-top:8px">Écart du dernier comptage coffre dans le sheet : <b>${EUR(sheet.count.ecart)}</b></p>` : ''}
-        ` : `<p class="muted">${s.sheet_error ? 'Erreur de lecture : ' + esc(s.sheet_error) : 'Pas encore lu. Configure le compte de service Google puis clique « Relire les sheets ».'}</p>`}
+        ` : `<p class="muted">${s.sheet_error ? 'Erreur de lecture : ' + esc(s.sheet_error) : 'Pas encore lu : il le sera à la prochaine analyse (12h05, 18h05 ou « Analyser maintenant »).'}</p>`}
         ${Object.keys(s.operators_diff || {}).length ? `<h2 style="margin-top:14px">Écarts par caissier (rapports Orika du mois)</h2><table><thead><tr><th>Opérateur</th><th class="num">Différence cumulée</th></tr></thead><tbody>${Object.entries(s.operators_diff).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).map(([p, v]) => `<tr><td>${esc(p)}</td><td class="num">${renderEcart(-v, true)}</td></tr>`).join('')}</tbody></table>` : ''}
       </div>
     </div>`;
@@ -346,6 +401,24 @@
     const deps = (a.deposits || []).map(d => `<tr><td>${FRD(d.deposit_date)}</td><td>${esc(d.bag_number || '—')}</td><td class="num">${EUR(d.slip_amount)}</td><td class="num">${EUR(d.receipt_amount)}</td><td class="num"><b>${EUR(d.amount)}</b></td><td class="small">${(d.breakdown || []).map(b => `${b.count}×${b.denomination}`).join(' ')}</td></tr>`).join('');
     const ops = (a.reports || []).flatMap(r => r.operators || []);
     const opsTable = ops.length ? `<h3 style="margin-top:14px">Opérateurs (rapport Orika)</h3><table><thead><tr><th>Opérateur</th><th class="num">Fond de caisse</th><th class="num">Espèces</th><th class="num">Prélèvement</th><th class="num">Théorique</th><th class="num">Déclaré</th><th class="num">Différence</th></tr></thead><tbody>${ops.map(o => `<tr><td>${esc(o.name)}</td><td class="num">${EUR(o.fdc)}</td><td class="num">${EUR(o.cash)}</td><td class="num">${EUR(o.prelevement)}</td><td class="num">${EUR(o.theorique)}</td><td class="num">${EUR(o.declaration)}</td><td class="num">${renderEcart(-(o.difference || 0), true)}</td></tr>`).join('')}</tbody></table>` : '';
+    const sh = s.sheet || {};
+    let sheetBlock = '';
+    if (!sh.available) {
+      sheetBlock = `<h3 style="margin-top:14px">Écarts de caisse (Google Sheet)</h3><p class="muted small">Le sheet n'a pas encore été lu. Il le sera à la prochaine analyse (12h05, 18h05 ou « Analyser maintenant »).</p>`;
+    } else if (!(sh.register_diffs || []).length && !(sh.expenses || []).length) {
+      sheetBlock = `<h3 style="margin-top:14px">Écarts de caisse (Google Sheet)</h3><p class="muted small">Aucun écart ni facture saisi dans le sheet pour ces journées${sh.fetched_at ? ' (lu le ' + FRDT(sh.fetched_at) + ')' : ''}.</p>`;
+    } else {
+      const explained = sh.total != null ? -sh.total : 0;
+      const rest = a.ecart != null ? Math.round((a.ecart - explained) * 100) / 100 : null;
+      sheetBlock = `<h3 style="margin-top:14px">Écarts de caisse (Google Sheet)</h3>
+        <p class="small muted" style="margin-top:-4px">Saisis par caissier dans le sheet « Comptage coffre »${sh.fetched_at ? ', lu le ' + FRDT(sh.fetched_at) : ''}. Négatif : il manquait de l'argent dans la caisse.</p>
+        ${(sh.register_diffs || []).length ? `<table><thead><tr><th>Date</th><th>Personne</th><th class="num">Écart</th><th>Note</th></tr></thead><tbody>
+          ${sh.register_diffs.map(e => `<tr><td>${FRD(e.date)}</td><td>${esc(e.person || '?')}</td><td class="num">${e.amount ? `<span class="pill ${Math.abs(e.amount) >= 5 ? 'bad' : Math.abs(e.amount) >= 1 ? 'warn' : 'ok'}">${e.amount > 0 ? '+' : ''}${EUR(e.amount)}</span>` : EUR(0)}</td><td class="small muted">${esc(e.extra_label || '')}${e.extra_amount != null ? ' ' + EUR(e.extra_amount) : ''}</td></tr>`).join('')}
+          <tr><td colspan="2"><b>Total des écarts de caisse</b></td><td class="num"><b>${EUR(sh.total)}</b></td><td></td></tr>
+        </tbody></table>` : ''}
+        ${(sh.expenses || []).length ? `<p class="small" style="margin-top:8px">Factures payées en espèces saisies dans le sheet : ${sh.expenses.map(e => `${FRD(e.date)} ${EUR(e.amount)}`).join(' · ')} · total <b>${EUR(sh.expenses_total)}</b></p>` : ''}
+        ${a.ecart != null && sh.total != null ? `<p class="small" style="margin-top:8px">Écart du dépôt : <b>${EUR(a.ecart)}</b>. Les écarts de caisse du sheet en expliquent <b>${EUR(explained)}</b>, il reste <b>${EUR(rest)}</b> non expliqué${Math.abs(rest) < 5 ? ' (pièces gardées au coffre, probablement)' : ''}.</p>` : ''}`;
+    }
     $('#modal').innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>${esc(s.store_label)} · envoi n°${s.id} · ${esc(s.period || '')}</h3><button class="small" id="modal-close">Fermer</button></div>
       <p class="small muted">Reçu le ${FRDT(s.created_at)} · ${s.status === 'confirmed' ? 'confirmé le ' + FRDT(s.confirmed_at) : s.status}${s.note ? ` · remarque : « ${esc(s.note)} »` : ''}</p>
@@ -359,6 +432,7 @@
       ${reports ? `<h3 style="margin-top:14px">Relevés</h3><table><thead><tr><th>Caisse</th><th>Période</th><th class="num">Espèces</th><th>Note manuscrite</th></tr></thead><tbody>${reports}</tbody></table>` : ''}
       ${deps ? `<h3 style="margin-top:14px">Dépôts</h3><table><thead><tr><th>Date</th><th>Sac</th><th class="num">Bordereau</th><th class="num">Automate</th><th class="num">Retenu</th><th>Coupures</th></tr></thead><tbody>${deps}</tbody></table>` : ''}
       ${(s.bank || []).length ? `<p class="small" style="margin-top:8px">Banque : ${s.bank.map(b => { const [bl, bc] = BANK[b.bank_status] || BANK.unchecked; return `<span class="pill ${bc}">${bl}</span> ${b.bank_date ? FRD(b.bank_date) + ' ' : ''}${b.bank_amount ? EUR(b.bank_amount) : ''}`; }).join(' · ')}</p>` : ''}
+      ${sheetBlock}
       ${opsTable}
       <h3 style="margin-top:14px">Documents</h3><div class="docgrid">${docs || '<p class="muted">Aucun document.</p>'}</div>
       ${s.status === 'confirmed' ? `<p style="margin-top:14px"><button class="small" id="modal-cancel">Annuler cet envoi (erreur de saisie)</button></p>` : ''}`;

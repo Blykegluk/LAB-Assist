@@ -912,6 +912,7 @@ def submission_to_dict(db: Session, sub: CashSubmission, with_docs: bool = True)
         deps = db.execute(select(CashDeposit).where(CashDeposit.submission_id == sub.id)).scalars().all()
         out["bank"] = [{"id": d.id, "bag_number": d.bag_number, "amount": d.amount, "deposit_date": iso(d.deposit_date),
                         "bank_status": d.bank_status, "bank_date": iso(d.bank_date), "bank_amount": d.bank_amount} for d in deps]
+        out["sheet"] = sheet_detail_for_days(db, sub.store_id, (analysis.get("coverage") or {}).get("days") or [])
     return out
 
 
@@ -1115,6 +1116,107 @@ def sync_sheet(db: Session, store: dict, force: bool = False, r: Optional[dict] 
         return {"ok": False, "error": str(e)}
 
 
+def store_sheet_values(db: Session, store_id: str, tab_title: str, values: list[list]) -> dict:
+    """Onglet « Comptage coffre » transmis par la tâche d'analyse (connecteur Google Sheets)."""
+    from .cash_sheets import parse_coffre_tab
+
+    if not store_by_id(store_id):
+        raise ValueError(f"Magasin inconnu : {store_id}")
+    rows = [[("" if c is None else str(c)) for c in (row or [])] for row in (values or [])]
+    data = parse_coffre_tab(rows, tab_title or "")
+    db.add(CashSheetSnapshot(store_id=store_id, tab_title=tab_title, data_json=json.dumps(data, ensure_ascii=False), ok=True))
+    db.commit()
+    return {"store_id": store_id, "tab": tab_title, "register_diffs": len(data["register_diffs"]),
+            "expenses": len(data["expenses"]), "deposits": len(data["deposits"])}
+
+
+def sheet_entries(db: Session, store_id: str) -> dict:
+    """Écarts de caisse, factures et dépôts du sheet, tous onglets reçus confondus (dernière lecture de chaque onglet)."""
+    snaps = db.execute(select(CashSheetSnapshot).where(CashSheetSnapshot.store_id == store_id, CashSheetSnapshot.ok.is_(True))
+                       .order_by(CashSheetSnapshot.fetched_at.desc())).scalars().all()
+    seen: set = set()
+    out = {"register_diffs": [], "expenses": [], "deposits": [], "tabs": [], "fetched_at": None}
+    for s in snaps:
+        if s.tab_title in seen:
+            continue
+        seen.add(s.tab_title)
+        data = json.loads(s.data_json or "{}")
+        out["tabs"].append(s.tab_title)
+        out["fetched_at"] = out["fetched_at"] or s.fetched_at.isoformat()
+        for key in ("register_diffs", "expenses", "deposits"):
+            for e in data.get(key) or []:
+                out[key].append(dict(e, tab=s.tab_title))
+    return out
+
+
+def _in(d: Optional[str], start: date, end: date) -> bool:
+    x = parse_date_any(d)
+    return bool(x and start <= x <= end)
+
+
+def sheet_detail_for_days(db: Session, store_id: str, days: list[str]) -> dict:
+    """Écarts de caisse et factures du sheet sur les journées d'un envoi."""
+    if not days:
+        return {"register_diffs": [], "expenses": [], "total": None, "available": False}
+    entries = sheet_entries(db, store_id)
+    dayset = set(days)
+    diffs = sorted([e for e in entries["register_diffs"] if e.get("date") in dayset], key=lambda e: (e["date"], e.get("person") or ""))
+    exps = sorted([e for e in entries["expenses"] if e.get("date") in dayset], key=lambda e: e["date"])
+    return {
+        "available": bool(entries["tabs"]),
+        "fetched_at": entries["fetched_at"],
+        "register_diffs": diffs,
+        "total": r2(sum(e["amount"] for e in diffs)) if diffs else None,
+        "expenses": exps,
+        "expenses_total": r2(sum(e["amount"] for e in exps)) if exps else None,
+    }
+
+
+def synthesis(db: Session, month: str, store_id: Optional[str] = None) -> dict:
+    """Synthèse du mois : écarts de caisse par personne (sheet) et factures payées en espèces."""
+    start, end = month_bounds(month)
+    stores_out = []
+    for store in config_stores():
+        if store_id and store["id"] != store_id:
+            continue
+        entries = sheet_entries(db, store["id"])
+        diffs = [e for e in entries["register_diffs"] if _in(e.get("date"), start, end)]
+        people: dict[str, dict] = {}
+        for e in diffs:
+            name = (e.get("person") or "?").strip().lower() or "?"
+            p = people.setdefault(name, {"person": name.capitalize(), "days": set(), "total": 0.0, "shortfall": 0.0, "surplus": 0.0, "lines": 0, "worst": 0.0})
+            p["days"].add(e["date"])
+            p["lines"] += 1
+            p["total"] += e["amount"]
+            if e["amount"] < 0:
+                p["shortfall"] += e["amount"]
+            elif e["amount"] > 0:
+                p["surplus"] += e["amount"]
+            if abs(e["amount"]) > abs(p["worst"]):
+                p["worst"] = e["amount"]
+        persons = sorted(({**p, "days": len(p["days"]), "total": r2(p["total"]), "shortfall": r2(p["shortfall"]),
+                           "surplus": r2(p["surplus"]), "worst": r2(p["worst"])} for p in people.values()),
+                         key=lambda p: p["total"])
+        sheet_exp = [e for e in entries["expenses"] if _in(e.get("date"), start, end)]
+        site_exp = db.execute(select(CashExpense).join(CashSubmission, CashSubmission.id == CashExpense.submission_id)
+                              .where(CashExpense.store_id == store["id"], CashSubmission.status == "confirmed")).scalars().all()
+        site_exp = [e for e in site_exp if e.expense_date and start <= e.expense_date <= end]
+        stores_out.append({
+            "id": store["id"], "label": store["label"], "color": store.get("color"),
+            "sheet_available": bool(entries["tabs"]), "sheet_fetched_at": entries["fetched_at"], "sheet_tabs": entries["tabs"],
+            "persons": persons,
+            "register_total": r2(sum(e["amount"] for e in diffs)) if diffs else 0.0,
+            "register_lines": len(diffs),
+            "invoices": {
+                "sheet_count": len(sheet_exp), "sheet_total": r2(sum(e["amount"] for e in sheet_exp)),
+                "sheet_items": sorted(({"date": e["date"], "amount": e["amount"]} for e in sheet_exp), key=lambda x: x["date"]),
+                "site_count": len(site_exp), "site_total": r2(sum(e.amount for e in site_exp)),
+                "site_items": [{"date": iso(e.expense_date), "amount": e.amount, "label": e.label, "submission_id": e.submission_id} for e in site_exp],
+            },
+        })
+    return {"month": month, "stores": stores_out}
+
+
 def latest_snapshot(db: Session, store_id: str, ok_only: bool = False) -> Optional[CashSheetSnapshot]:
     q = select(CashSheetSnapshot).where(CashSheetSnapshot.store_id == store_id)
     if ok_only:
@@ -1289,7 +1391,8 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
             m_diffs = [x for x in diffs if x.get("date") and start <= parse_date_any(x["date"]) <= end]
             by_person: dict[str, float] = {}
             for x in m_diffs:
-                by_person[x.get("person") or "?"] = round(by_person.get(x.get("person") or "?", 0.0) + (x.get("amount") or 0), 2)
+                name = (x.get("person") or "?").strip().capitalize() or "?"  # « clarisse » = « Clarisse »
+                by_person[name] = round(by_person.get(name, 0.0) + (x.get("amount") or 0), 2)
             sheet = {
                 "fetched_at": snap.fetched_at.isoformat(),
                 "tab_title": snap.tab_title,
