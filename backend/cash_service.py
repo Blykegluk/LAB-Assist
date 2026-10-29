@@ -1426,12 +1426,35 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                                                               CashBankTransaction.tx_date <= end)).scalars().all()
         m_reports = [rp for rp in reports if start <= rp.period_end <= end]
         m_deposits = [d for d in deposits if start <= d.deposit_date <= end]
-        m_expenses = [e for e in expenses if e.expense_date and start <= e.expense_date <= end]
         m_subs = [s for s in subs if s.confirmed_at and start <= s.confirmed_at.date() <= end]
-        cash = sum(rp.cash_amount for rp in m_reports)
-        dep = sum(d.amount for d in m_deposits)
-        exp = sum(e.amount for e in m_expenses)
-        ecart_total = sum((s.ecart or 0) for s in m_subs if s.ecart is not None)
+        # Bilan du mois, envoi par envoi (envois dont le relevé se termine dans le mois) : encaissé − factures = à déposer ;
+        # à déposer − déposé = écart (envois avec bordereau) + reste à déposer (envois sans bordereau).
+        reps_by_sub: dict[int, list[CashReport]] = {}
+        for rp in reports:
+            reps_by_sub.setdefault(rp.submission_id, []).append(rp)
+        deps_by_sub: dict[int, list[CashDeposit]] = {}
+        for d in deposits:
+            deps_by_sub.setdefault(d.submission_id, []).append(d)
+        exp_by_sub: dict[int, float] = {}
+        for e in expenses:
+            exp_by_sub[e.submission_id] = exp_by_sub.get(e.submission_id, 0.0) + (e.amount or 0)
+        rkey = lambda rp: (rp.period_start, rp.period_end, round(rp.cash_amount or 0, 2))
+        duplicates: list[int] = []
+        for sb in subs:  # relevé seul déjà envoyé (identique) dans un autre envoi : compté une seule fois
+            mine = reps_by_sub.get(sb.id) or []
+            if mine and not deps_by_sub.get(sb.id):
+                others = {rkey(rp) for o in subs if o.id != sb.id for rp in reps_by_sub.get(o.id) or []}
+                if all(rkey(rp) in others for rp in mine):
+                    duplicates.append(sb.id)
+        dup_set = set(duplicates)
+        b_subs = [sb for sb in subs if sb.id not in dup_set and reps_by_sub.get(sb.id)
+                  and start <= max(rp.period_end for rp in reps_by_sub[sb.id]) <= end]
+        cash = sum(rp.cash_amount or 0 for sb in b_subs for rp in reps_by_sub[sb.id])
+        exp = sum(exp_by_sub.get(sb.id, 0.0) for sb in b_subs)
+        dep = sum(d.amount or 0 for sb in b_subs for d in deps_by_sub.get(sb.id) or [])
+        ecart_total = sum((sb.ecart or 0) for sb in b_subs if sb.ecart is not None)
+        undeposited = [sb for sb in b_subs if not deps_by_sub.get(sb.id)]
+        pending_amount = sum(sum(rp.cash_amount or 0 for rp in reps_by_sub[sb.id]) - exp_by_sub.get(sb.id, 0.0) for sb in undeposited)
         operators_diff: dict[str, float] = {}
         for rp in m_reports:
             try:
@@ -1477,7 +1500,14 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                 "cash_collected": r2(cash),
                 "deposited": r2(dep),
                 "expenses": r2(exp),
+                "to_deposit": r2(cash - exp),
                 "ecart_total": r2(ecart_total),
+                "pending_deposit": r2(pending_amount),
+                "pending_count": len(undeposited),
+                "duplicates": [sb.id for sb in subs if sb.id in dup_set and reps_by_sub.get(sb.id)
+                               and start <= max(rp.period_end for rp in reps_by_sub[sb.id]) <= end],
+                "balance_submissions": len(b_subs),
+                "balance_deposits": sum(len(deps_by_sub.get(sb.id) or []) for sb in b_subs),
                 "submissions": len(m_subs),
                 "deposits_count": len(m_deposits),
                 "open_alerts": len([a for a in alerts if a.status == "open"]),

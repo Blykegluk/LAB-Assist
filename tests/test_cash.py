@@ -701,3 +701,24 @@ def test_person_aliases_merge_typos():
     a = person_aliases(names)
     assert a["camile"] == a["cam"] == "camille" and a["mohamed"] == "mohammed" and a["interiml"] == "interim"
     assert a["yvenso"] == "yvenson" and a["tony"] == "tony" and a["interim3"] == "interim3" and a["rony"] == "rony"
+
+
+def test_dashboard_balance_ignores_duplicate_releve(client, monkeypatch):
+    """Relevé envoyé seul puis renvoyé avec son bordereau : compté une fois ; encaissé − factures − déposé = écart."""
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    w = _worker_headers()
+    m = _login(client, "2468")
+    o = _login(client, "owner-secret")
+    rel = dict(RELEVE_ORIKA, period_start="10/03/2026", period_end="12/03/2026", cash_amount=2059.27, handwritten_amount=None)
+    dep = {"type": "bordereau", "confidence": 0.9, "deposit_date": "13/03/2026", "deposit_amount": 2045, "bag_number": "0004841120", "account_holder": "JAB"}
+    fac = {"type": "facture", "confidence": 0.9, "invoice": {"date": "11/03/2026", "amount": 14.45, "supplier": "Auchan"}}
+    for docs in ([rel], [rel, dep, fac]):
+        sid = _deferred_upload(client, m, "ornano", [f"d{i}.jpg" for i in range(len(docs))])["submission_id"]
+        ids = [d["id"] for d in _queue_item(client, sid)["documents"]]
+        r = client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w,
+                        json={"documents": [{"document_id": i, "extraction": x} for i, x in zip(ids, docs)]})
+        assert r.status_code == 200, r.text
+    k = next(s for s in client.get("/cash/dashboard?month=2026-03&store_id=ornano", headers=o).json()["stores"] if s["id"] == "ornano")["kpis"]
+    assert k["cash_collected"] == 2059.27 and len(k["duplicates"]) == 1 and k["balance_submissions"] == 1
+    assert k["expenses"] == 14.45 and k["to_deposit"] == 2044.82 and k["deposited"] == 2045 and k["pending_deposit"] == 0
+    assert round(k["to_deposit"] - k["pending_deposit"] - k["deposited"], 2) == k["ecart_total"] == -0.18
