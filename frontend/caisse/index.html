@@ -335,14 +335,12 @@
     <div class="store-head"><span class="dot" style="background:${s.color}"></span><h2>${esc(s.label)}</h2>
       <span class="meta">${esc(s.entity || '')} · caisse ${esc(s.pos_system)} · dernier relevé : ${s.last_covered ? 'jusqu\'au ' + FRD(s.last_covered) : 'aucun'}</span></div>
     <div class="kpis">
-      <div class="kpi"><div class="l">Espèces encaissées</div><div class="v">${EUR(k.cash_collected)}</div><div class="s">${k.submissions} envoi(s) ce mois</div></div>
-      ${k.bank_cash_count
-        ? `<div class="kpi"><div class="l">Déposé en banque</div><div class="v">${EUR(k.bank_cash_total)}</div><div class="s">${k.bank_cash_count} dépôt(s) au relevé · ${k.deposits_count} justifié(s) sur le site</div></div>`
-        : `<div class="kpi"><div class="l">Déposé en banque</div><div class="v">${EUR(k.deposited)}</div><div class="s">${k.deposits_count} dépôt(s)${k.expenses ? ' · factures espèces ' + EUR(k.expenses) : ''}</div></div>`}
-      <div class="kpi ${ecartCls}"><div class="l">Écart cumulé</div><div class="v">${k.ecart_total == null ? '—' : (k.ecart_total > 0 ? '−' : k.ecart_total < 0 ? '+' : '') + EUR(Math.abs(k.ecart_total))}</div><div class="s">${k.ecart_total > 0 ? 'moins déposé qu\'encaissé' : k.ecart_total < 0 ? 'plus déposé qu\'encaissé' : 'à l\'équilibre'}</div></div>
+      <div class="kpi"><div class="l">Espèces encaissées</div><div class="v">${EUR(k.cash_collected)}</div><div class="s">${k.balance_submissions} envoi(s)${k.expenses ? ` · − ${EUR(k.expenses)} de factures payées en espèces = <b>${EUR(k.to_deposit)}</b> à déposer` : ''}${(k.duplicates || []).length ? ` · envoi ${k.duplicates.map(i => 'n°' + i).join(', ')} en double, compté une fois` : ''}</div></div>
+      <div class="kpi"><div class="l">Déposé (bordereaux)</div><div class="v">${EUR(k.deposited)}</div><div class="s">${k.balance_deposits} bordereau(x)${k.pending_count ? ` · <b>${EUR(k.pending_deposit)}</b> pas encore déposé(s) (${k.pending_count} envoi(s) sans bordereau)` : ''}</div></div>
+      <div class="kpi ${ecartCls}"><div class="l">Écart cumulé</div><div class="v">${k.ecart_total == null ? '—' : (k.ecart_total > 0 ? '−' : k.ecart_total < 0 ? '+' : '') + EUR(Math.abs(k.ecart_total))}</div><div class="s">${EUR(k.deposited)} déposé − ${EUR(Math.round((k.to_deposit - k.pending_deposit) * 100) / 100)} à déposer${k.ecart_total > 0 ? ' : il manque de l\'argent' : k.ecart_total < 0 ? ' : plus déposé que prévu' : ' : à l\'équilibre'}</div></div>
       <div class="kpi ${k.critical_alerts ? 'bad' : k.open_alerts ? 'warn' : 'ok'}"><div class="l">Alertes ouvertes</div><div class="v">${k.open_alerts}</div><div class="s">${k.critical_alerts} critique(s)</div></div>
       <div class="kpi ${k.missing_days ? 'warn' : 'ok'}"><div class="l">Jours non traités</div><div class="v">${k.missing_days}</div><div class="s">ce mois, hors délai</div></div>
-      <div class="kpi ${k.bank_missing ? 'bad' : 'ok'}"><div class="l">Crédités en banque</div><div class="v">${bankTxt}</div><div class="s">${k.bank_missing ? k.bank_missing + ' manquant(s)' : (k.bank_unchecked ? k.bank_unchecked + ' à vérifier' : 'tout est crédité')}</div></div>
+      <div class="kpi ${k.bank_missing ? 'bad' : 'ok'}"><div class="l">Crédités en banque</div><div class="v">${bankTxt}</div><div class="s">${k.bank_missing ? k.bank_missing + ' manquant(s)' : (k.bank_unchecked ? k.bank_unchecked + ' à vérifier' : 'tout est crédité')}${k.bank_cash_count ? ` · ${EUR(k.bank_cash_total)} au relevé (${k.bank_cash_count} dépôt(s))` : ''}</div></div>
     </div>
     <div class="grid" style="margin-top:14px">
       <div class="card">
