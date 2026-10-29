@@ -1501,11 +1501,18 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
             diffs = data.get("register_diffs") or []
             m_diffs = [x for x in diffs if x.get("date") and start <= parse_date_any(x["date"]) <= end]
             by_person: dict[str, float] = {}
+            person_entries: dict[str, list] = {}
             aliases = person_aliases([x.get("person") or "" for x in diffs])  # « clarisse » = « Clarisse », « camile » = « camille »
             for x in m_diffs:
-                key = (x.get("person") or "").strip().lower().rstrip(",.;")
-                name = aliases.get(key, key).capitalize() or "?"
+                raw = (x.get("person") or "").strip()
+                key = raw.lower().rstrip(",.;")
+                canon = aliases.get(key, key)
+                name = canon.capitalize() or "?"
                 by_person[name] = round(by_person.get(name, 0.0) + (x.get("amount") or 0), 2)
+                person_entries.setdefault(name, []).append({"date": x.get("date"), "amount": x.get("amount"), "note": x.get("extra_label"),
+                                                            "note_amount": x.get("extra_amount"), "written_as": raw if key != canon else None})
+            for v in person_entries.values():
+                v.sort(key=lambda e: e["date"] or "")
             sheet = {
                 "fetched_at": snap.fetched_at.isoformat(),
                 "tab_title": snap.tab_title,
@@ -1514,6 +1521,7 @@ def dashboard(db: Session, store_id: Optional[str], month: str) -> dict:
                 "deposits": data.get("deposits"),
                 "register_diffs_month": round(sum(x.get("amount") or 0 for x in m_diffs), 2),
                 "register_diffs_by_person": by_person,
+                "register_diffs_entries": person_entries,
                 "expenses": data.get("expenses"),
                 "coins_added": data.get("coins_added"),
             }
