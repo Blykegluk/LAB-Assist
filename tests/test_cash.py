@@ -627,3 +627,66 @@ def test_manual_analysis_request(client, monkeypatch):
     client.post(f"/cash/submissions/{sid}/cancel", headers=o)
     client.post("/cash/worker/checks", headers=_worker_headers())
     assert client.get("/cash/worker/should-run", headers=_worker_headers()).json()["requested_at"] is None
+
+
+def test_sheet_dates_without_year_and_titles():
+    from datetime import date as _d
+    from backend.cash_sheets import parse_fr_date, _year_from_title, parse_coffre_tab
+
+    assert _year_from_title("Du 05/08") is None and _year_from_title("Du 15/06 au ...") is None
+    assert _year_from_title("20250915") == 2025 and _year_from_title("du 18/10/25 au 15/01/26") == 2025
+    today = _d.today()
+    assert parse_fr_date("12 août").month == 8 and parse_fr_date("5 septembre").month == 9 and parse_fr_date("10-août").day == 10
+    assert parse_fr_date("1er octobre").day == 1
+    from datetime import timedelta as _td
+    # Sans année : l'année en cours, sauf si la date tombe à plus de 45 jours dans le futur
+    expected = today.year - 1 if _d(today.year, 12, 15) > today + _td(days=45) else today.year
+    assert parse_fr_date("15/12").year == expected
+    vals = [["", "", "", "", "", "", "", "", "", "Ecarts", "Personne", "Date"],
+            ["", "", "", "", "", "", "", "", "", "-18,19", "cylia", "10-août", "achat "],
+            ["", "", "", "", "", "", "", "", "", "0,26", "interim", "10-août"]]
+    data = parse_coffre_tab(vals, "Du 05/08")
+    first = data["register_diffs"][0]
+    assert first["amount"] == -18.19 and first["extra_label"] == "achat" and first["date"].endswith("-08-10")
+
+
+def test_sheet_values_detail_and_synthesis(client, monkeypatch):
+    from datetime import date as _d, timedelta as _td
+    monkeypatch.setenv("CASH_ANALYSIS_MODE", "deferred")
+    w = _worker_headers()
+    o = _login(client, "owner-secret")
+    day1 = _d.today() - _td(days=3)
+    day2 = _d.today() - _td(days=2)
+    f = lambda d: d.strftime("%d/%m")
+    values = [
+        ["", "", "", "", "", "", "", "", "", "Liste depots", "Date", "", "", "Ajout monnaie", "Date", "", "", "Factures", "Date"],
+        ["", "", "", "", "", "", "", "", "", "2140", f(day2), "", "", "", "", "", "", "18,19", f(day1)],
+        ["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "6,13", f(day2)],
+        [], ["", "", "", "", "", "", "", "", "Total", "2140", "", "", "Total", "0", "", "", "Total", "24,32"], [],
+        ["", "", "", "", "", "", "", "", "", "Ecarts", "Personne", "Date"],
+        ["", "", "", "", "", "", "", "", "", "-5,85", "clarisse", f(day1)],
+        ["", "", "", "", "", "", "", "", "", "-3,09", "cedric", f(day1)],
+        ["", "", "", "", "", "", "", "", "", "0,40", "Clarisse", f(day2)],
+    ]
+    r = client.post("/cash/worker/sheet-values", headers=w, json={"store_id": "leon_blum", "tab_title": "Du 05/08", "values": values})
+    assert r.status_code == 200, r.text and r.json()["register_diffs"] == 3
+    assert client.post("/cash/worker/sheet-values", headers=w, json={"store_id": "nope", "tab_title": "x", "values": []}).status_code == 400
+    assert client.post("/cash/worker/sheet-values", headers=o, json={"store_id": "leon_blum", "tab_title": "x", "values": []}).status_code == 200  # gérant accepté
+    assert {s["store_id"] for s in client.get("/cash/worker/sheets", headers=w).json()["stores"]} == {"leon_blum", "ornano"}
+
+    # Envoi couvrant day1-day2 : le détail montre les écarts du sheet de ces journées
+    m = _login(client, "2468")
+    sid = _deferred_upload(client, m, "leon_blum", ["r.jpg"])["submission_id"]
+    doc = _queue_item(client, sid)["documents"][0]["id"]
+    ex = dict(RELEVE_LB_1920, period_start=day1.strftime("%d/%m/%Y"), period_end=day2.strftime("%d/%m/%Y"), cash_amount=2150.87)
+    client.post(f"/cash/worker/submissions/{sid}/extractions", headers=w, json={"documents": [{"document_id": doc, "extraction": ex}]})
+    s = client.get(f"/cash/submissions/{sid}", headers=o).json()["sheet"]
+    assert s["available"] is True and [e["person"] for e in s["register_diffs"]] == ["cedric", "clarisse", "Clarisse"]
+    assert s["total"] == -8.54 and s["expenses_total"] == 24.32
+
+    syn = client.get(f"/cash/synthesis?month={day1.strftime('%Y-%m')}&store_id=leon_blum", headers=o).json()["stores"][0]
+    cl = next(p for p in syn["persons"] if p["person"] == "Clarisse")  # « clarisse » et « Clarisse » regroupés
+    assert cl["days"] == (1 if day1 == day2 else 2) and cl["total"] == -5.45 and cl["shortfall"] == -5.85 and cl["surplus"] == 0.4
+    if day1.month == day2.month:
+        assert syn["invoices"]["sheet_count"] == 2 and syn["invoices"]["sheet_total"] == 24.32
+    assert client.get("/cash/synthesis", headers=m).status_code == 403

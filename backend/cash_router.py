@@ -409,6 +409,35 @@ def admin_users(payload: AdminUsersIn, who: str = Depends(require_admin)):
     return {"accounts": stored, "overridden_by_env": bool(os.getenv("CASH_USERS"))}
 
 
+class SheetValuesIn(BaseModel):
+    store_id: str
+    tab_title: str
+    values: list[list]  # cellules brutes de l'onglet (Google Sheets values.get)
+
+
+@router.post("/worker/sheet-values")
+def worker_sheet_values(payload: SheetValuesIn, who: str = Depends(require_worker), db: Session = Depends(get_db)):
+    """Onglet « Comptage coffre » lu par la tâche d'analyse avec le connecteur Google Sheets."""
+    try:
+        return svc.store_sheet_values(db, payload.store_id, payload.tab_title, payload.values)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/synthesis")
+def get_synthesis(month: Optional[str] = None, store_id: Optional[str] = None, user: User = Depends(require_owner), db: Session = Depends(get_db)):
+    month = month or date.today().strftime("%Y-%m")
+    if not re.match(r"^\d{4}-\d{2}$", month):
+        raise HTTPException(status_code=400, detail="month doit être au format AAAA-MM")
+    return svc.synthesis(db, month, store_id)
+
+
+@router.get("/worker/sheets")
+def stores_sheets(who: str = Depends(require_worker)):
+    """Identifiants des Google Sheets « Comptage coffre » par magasin, pour la tâche d'analyse."""
+    return {"stores": [{"store_id": s["id"], "label": s["label"], "sheet_id": s.get("sheet_id")} for s in config_stores() if s.get("sheet_id")]}
+
+
 class BankImportIn(BaseModel):
     entity: str  # AEJB, JAB
     transactions: list[dict]  # [{id, date, amount, label}] tels que renvoyés par Pennylane

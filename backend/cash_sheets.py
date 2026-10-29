@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 log = logging.getLogger("cash.sheets")
@@ -60,34 +60,31 @@ def parse_fr_date(s: Any, default_year: Optional[int] = None) -> Optional[date]:
     t = str(s).strip().lower()
     if not t:
         return None
-    year = default_year or date.today().year
-    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?$", t)
-    if m:
-        d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
-        if y:
-            yy = int(y)
-            yy = yy + 2000 if yy < 100 else yy
-        else:
-            yy = year
+
+    def build(d: int, mo: int, y: Optional[str]) -> Optional[date]:
         try:
-            return date(yy, mo, d)
+            if y:
+                yy = int(y)
+                return date(yy + 2000 if yy < 100 else yy, mo, d)
+            if default_year:
+                return date(default_year, mo, d)
+            # Année absente (« 12 août », « 05/08 ») : l'année en cours, sauf si la date tomberait
+            # nettement dans le futur, auquel cas c'est l'année précédente (onglet à cheval sur l'an).
+            today = date.today()
+            cand = date(today.year, mo, d)
+            return date(today.year - 1, mo, d) if cand > today + timedelta(days=45) else cand
         except ValueError:
             return None
-    m = re.match(r"^(\d{1,2})[\s\-]*([a-zéû]+)\.?(?:[\s\-]*(\d{2,4}))?$", t)
+
+    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?$", t)
     if m:
-        d, mon, y = int(m.group(1)), m.group(2), m.group(3)
-        mo = None
+        return build(int(m.group(1)), int(m.group(2)), m.group(3))
+    m = re.match(r"^(\d{1,2})(?:er)?[\s\-]*([a-zéûè]+)\.?(?:[\s\-]*(\d{2,4}))?$", t)
+    if m:
+        mon = m.group(2)
         for k, v in MONTHS_FR.items():
             if mon.startswith(k):
-                mo = v
-                break
-        if mo:
-            yy = int(y) if y else year
-            yy = yy + 2000 if yy < 100 else yy
-            try:
-                return date(yy, mo, d)
-            except ValueError:
-                return None
+                return build(int(m.group(1)), v, m.group(3))
     return None
 
 
@@ -100,7 +97,7 @@ def _find_header(values: list[list[str]], label: str) -> Optional[tuple[int, int
     return None
 
 
-def _column_pairs(values: list[list[str]], r: int, c: int, default_year: int, max_rows: int = 400) -> list[dict]:
+def _column_pairs(values: list[list[str]], r: int, c: int, default_year: Optional[int], max_rows: int = 400) -> list[dict]:
     """Lit les couples (montant, date) sous un en-tête, jusqu'à la ligne 'Total' ou un long vide."""
     out = []
     blank = 0
@@ -126,17 +123,18 @@ def _column_pairs(values: list[list[str]], r: int, c: int, default_year: int, ma
 
 
 def _year_from_title(title: str) -> Optional[int]:
-    m = re.search(r"/(\d{2,4})\b", title or "")
+    """Année explicite du titre d'onglet seulement (« 20250915 », « du 18/10/25 au … ») ; « Du 05/08 » n'en a pas."""
+    m = re.search(r"\b\d{1,2}/\d{1,2}/(\d{2,4})\b", title or "")
     if m:
         y = int(m.group(1))
         return y + 2000 if y < 100 else y
-    m = re.match(r"^(20\d{2})", title or "")
+    m = re.match(r"^\s*(20\d{2})(\d{2})(\d{2})\b", title or "")
     return int(m.group(1)) if m else None
 
 
 def parse_coffre_tab(values: list[list[str]], tab_title: str = "", default_year: Optional[int] = None) -> dict:
     """Transforme les cellules d'un onglet de période en structure exploitable."""
-    year = default_year or _year_from_title(tab_title) or date.today().year
+    year = default_year or _year_from_title(tab_title)  # None : année déduite date par date
     out: dict[str, Any] = {"tab_title": tab_title, "deposits": [], "coins_added": [], "expenses": [], "register_diffs": [], "count": {}}
     h = _find_header(values, "liste depots") or _find_header(values, "liste dépôts")
     if h:
@@ -162,8 +160,11 @@ def parse_coffre_tab(values: list[list[str]], tab_title: str = "", default_year:
                 continue
             person = (row[c + 1] if c + 1 < len(row) else "").strip()
             d = row[c + 2] if c + 2 < len(row) else ""
-            extra_amt = parse_amount(row[c + 3]) if c + 3 < len(row) else None
+            extra_raw = (row[c + 3] if c + 3 < len(row) else "").strip()
+            extra_amt = parse_amount(extra_raw) if extra_raw else None
             extra_lab = (row[c + 4] if c + 4 < len(row) else "").strip()
+            if extra_raw and extra_amt is None and not extra_lab:
+                extra_lab = extra_raw  # ex. « achat » écrit juste à côté de l'écart
             dt = parse_fr_date(d, year)
             out["register_diffs"].append(
                 {"amount": amt, "person": person, "date": dt.isoformat() if dt else None, "date_raw": str(d).strip(),
