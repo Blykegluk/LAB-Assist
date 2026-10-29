@@ -49,6 +49,8 @@
     th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--soft); }
+    .chev { display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; } tr.open .chev { transform: rotate(90deg); }
+    tr.pdetail > td { background: var(--soft); padding: 6px 10px 12px 26px; } table.sub { width: auto; min-width: 60%; } table.sub td, table.sub th { padding: 5px 10px; }
     .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
     .pill.ok { background: var(--ok-bg); color: #065f46; } .pill.bad { background: var(--bad-bg); color: #991b1b; } .pill.warn { background: var(--warn-bg); color: #92400e; } .pill.info { background: var(--info-bg); color: #1e3a8a; } .pill.muted { background: #e2e8f0; color: #334155; }
     .alert { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: start; padding: 10px 12px; border-radius: 12px; margin: 6px 0; border: 1px solid var(--line); background: #fff; }
@@ -208,6 +210,19 @@
     try { d = await api(`/cash/synthesis?month=${state.month}${state.store ? '&store_id=' + state.store : ''}`); } catch (e) { toast(e.message); return; }
     $('#synthesis').innerHTML = d.stores.map(renderSynthesisStore).join('') || '<div class="card"><p class="muted">Aucun magasin.</p></div>';
     $('#synthesis').querySelectorAll('[data-sub]').forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+    $('#synthesis').querySelectorAll('[data-pd]').forEach(r => r.onclick = () => {
+      const open = $('#pd-' + r.dataset.pd).classList.toggle('hidden') === false;
+      r.classList.toggle('open', open);
+    });
+  }
+
+  function personDetail(p) {
+    const nonZero = p.entries.filter(e => e.amount);
+    const zero = p.entries.length - nonZero.length;
+    return `<table class="sub"><thead><tr><th>Date</th><th class="num">Écart</th><th>Note</th></tr></thead><tbody>
+      ${nonZero.map(e => `<tr><td>${FRD(e.date)}</td><td class="num"><span class="pill ${Math.abs(e.amount) >= 5 ? 'bad' : Math.abs(e.amount) >= 1 ? 'warn' : 'ok'}">${e.amount > 0 ? '+' : ''}${EUR(e.amount)}</span></td><td class="small muted">${esc(e.note || '')}${e.note_amount != null ? ' ' + EUR(e.note_amount) : ''}${e.written_as ? ` (écrit « ${esc(e.written_as)} »)` : ''}</td></tr>`).join('')}
+      <tr><td><b>Total du mois</b></td><td class="num"><b>${p.total > 0 ? '+' : ''}${EUR(p.total)}</b></td><td class="small muted">${zero ? zero + ' jour(s) sans écart (0,00 €) non listés' : ''}</td></tr>
+    </tbody></table>`;
   }
 
   function renderSynthesisStore(s) {
@@ -216,11 +231,12 @@
       <span class="meta">${s.sheet_available ? 'sheet lu le ' + FRDT(s.sheet_fetched_at) + ' · onglets : ' + s.sheet_tabs.map(esc).join(', ') + (s.sheet_last_entry ? ' · dernier écart saisi le ' + FRD(s.sheet_last_entry) : '') : 'sheet pas encore lu : il le sera à la prochaine analyse'}</span></div>`;
     const kpis = `<div class="kpis">
       <div class="kpi ${s.register_total < -10 ? 'bad' : s.register_total < 0 ? 'warn' : 'ok'}"><div class="l">Écarts de caisse du mois</div><div class="v">${s.register_total > 0 ? '+' : ''}${EUR(s.register_total)}</div><div class="s">${s.register_lines} saisie(s) · ${s.persons.length} personne(s)</div></div>
-      <div class="kpi"><div class="l">Factures payées en espèces</div><div class="v">${inv.count}</div><div class="s">sheet : ${inv.sheet_count} · photos envoyées : ${inv.site_count}${inv.sheet_count + inv.site_count > inv.count ? ' · ' + (inv.sheet_count + inv.site_count - inv.count) + ' en double comptée(s) une fois' : ''}</div></div>
+      <div class="kpi"><div class="l">Factures payées en espèces</div><div class="v">${inv.count}</div><div class="s">sheet : ${inv.sheet_count} · photos envoyées : ${inv.site_count}${inv.sheet_count + inv.site_count > inv.count ? ' · dont ' + (inv.sheet_count + inv.site_count - inv.count) + ' présente(s) dans les deux' : ''}</div></div>
       <div class="kpi"><div class="l">Montant des factures</div><div class="v">${EUR(inv.total)}</div><div class="s">sheet ${EUR(inv.sheet_total)} · photos ${EUR(inv.site_total)}</div></div>
     </div>`;
     const persons = s.persons.length ? `<table><thead><tr><th>Personne</th><th class="num">Jours</th><th class="num">Manques</th><th class="num">Excédents</th><th class="num">Écart net</th><th class="num">Plus gros écart</th></tr></thead><tbody>
-      ${s.persons.map(p => `<tr><td>${esc(p.person)}</td><td class="num">${p.days}</td><td class="num">${EUR(p.shortfall)}</td><td class="num">${p.surplus ? '+' + EUR(p.surplus) : EUR(0)}</td><td class="num"><span class="pill ${p.total <= -10 ? 'bad' : p.total < -2 ? 'warn' : 'ok'}">${p.total > 0 ? '+' : ''}${EUR(p.total)}</span></td><td class="num">${p.worst > 0 ? '+' : ''}${EUR(p.worst)}</td></tr>`).join('')}
+      ${s.persons.map((p, i) => `<tr class="clickable" data-pd="${s.id}-${i}" title="Voir le détail"><td><span class="chev">▸</span> ${esc(p.person)}</td><td class="num">${p.days}</td><td class="num">${EUR(p.shortfall)}</td><td class="num">${p.surplus ? '+' + EUR(p.surplus) : EUR(0)}</td><td class="num"><span class="pill ${p.total <= -10 ? 'bad' : p.total < -2 ? 'warn' : 'ok'}">${p.total > 0 ? '+' : ''}${EUR(p.total)}</span></td><td class="num">${p.worst > 0 ? '+' : ''}${EUR(p.worst)}</td></tr>
+        <tr class="pdetail hidden" id="pd-${s.id}-${i}"><td colspan="6">${personDetail(p)}</td></tr>`).join('')}
     </tbody></table>` : `<p class="muted">${s.sheet_available ? 'Aucun écart de caisse saisi ce mois dans le sheet.' : 'Pas encore de données du sheet.'}</p>`;
     const items = inv.items || [];
     const invoices = items.length ? `<table><thead><tr><th>Date</th><th>Source</th><th>Libellé</th><th class="num">Montant</th></tr></thead><tbody>

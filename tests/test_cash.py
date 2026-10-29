@@ -687,6 +687,7 @@ def test_sheet_values_detail_and_synthesis(client, monkeypatch):
     syn = client.get(f"/cash/synthesis?month={day1.strftime('%Y-%m')}&store_id=leon_blum", headers=o).json()["stores"][0]
     cl = next(p for p in syn["persons"] if p["person"] == "Clarisse")  # « clarisse » et « Clarisse » regroupés
     assert cl["days"] == (1 if day1 == day2 else 2) and cl["total"] == -5.45 and cl["shortfall"] == -5.85 and cl["surplus"] == 0.4
+    assert [(e["date"], e["amount"]) for e in cl["entries"]] == sorted([(day1.isoformat(), -5.85), (day2.isoformat(), 0.4)])
     if day1.month == day2.month:
         assert syn["invoices"]["sheet_count"] == 2 and syn["invoices"]["sheet_total"] == 24.32
         assert syn["invoices"]["count"] == 2 and syn["invoices"]["total"] == 24.32

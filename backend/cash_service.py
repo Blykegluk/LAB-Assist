@@ -1226,7 +1226,9 @@ def synthesis(db: Session, month: str, store_id: Optional[str] = None) -> dict:
         people: dict[str, dict] = {}
         for e in diffs:
             name = (e.get("person") or "?").strip().lower() or "?"
-            p = people.setdefault(name, {"person": name.capitalize(), "days": set(), "total": 0.0, "shortfall": 0.0, "surplus": 0.0, "lines": 0, "worst": 0.0})
+            p = people.setdefault(name, {"person": name.capitalize(), "days": set(), "total": 0.0, "shortfall": 0.0, "surplus": 0.0, "lines": 0, "worst": 0.0, "entries": []})
+            p["entries"].append({"date": e["date"], "amount": e["amount"], "note": e.get("extra_label"), "note_amount": e.get("extra_amount"),
+                                 "written_as": e.get("person_raw") if (e.get("person_raw") or "").strip().lower() != name else None})
             p["days"].add(e["date"])
             p["lines"] += 1
             p["total"] += e["amount"]
@@ -1236,6 +1238,8 @@ def synthesis(db: Session, month: str, store_id: Optional[str] = None) -> dict:
                 p["surplus"] += e["amount"]
             if abs(e["amount"]) > abs(p["worst"]):
                 p["worst"] = e["amount"]
+        for p in people.values():
+            p["entries"].sort(key=lambda x: x["date"])
         persons = sorted(({**p, "days": len(p["days"]), "total": r2(p["total"]), "shortfall": r2(p["shortfall"]),
                            "surplus": r2(p["surplus"]), "worst": r2(p["worst"])} for p in people.values()),
                          key=lambda p: p["total"])
