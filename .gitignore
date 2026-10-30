@@ -20,3 +20,4 @@ Thumbs.db
 
 # Documents de caisse (photos envoyées par la responsable)
 data/
+.claude/settings.local.json
